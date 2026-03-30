@@ -1,7 +1,7 @@
 {
   "name": "yapay-zeka-sinav-kocu",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -16,7 +16,10 @@
     "expo": "~54.0.33",
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
+    "expo-linear-gradient": "~15.0.8",
+    "expo-linking": "~8.0.11",
     "expo-notifications": "~0.32.16",
+    "expo-router": "~6.0.23",
     "expo-status-bar": "~3.0.9",
     "firebase": "^12.11.0",
     "react": "19.1.0",
