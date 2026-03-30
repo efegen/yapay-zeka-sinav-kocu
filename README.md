@@ -1,1 +1,0 @@
-# yapay-zeka-sinav-kocu
