@@ -13,10 +13,13 @@ export interface KayitData {
   sinif: string;
   okulTuru: string;
   diplomaNotu: number;
+  gecenYilYerlesti?: boolean;
   puanTuru: string;
+  hedefTuru: 'universite' | 'siralama';
   hedefUniversite: string;
   hedefBolum: string;
   hedefProgramId: string;
+  hedefSiralama?: number;
   haftaCalismaSayisi: number;
   gunlukSoruHedefi: number;
   kvkkOnay: boolean;
