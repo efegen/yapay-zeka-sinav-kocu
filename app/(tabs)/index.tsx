@@ -8,6 +8,11 @@ import { COLORS } from '../../constants/colors';
 export default function AnaSayfa() {
   const { profil, yukleniyor } = useProfile();
 
+  const bugunHaftaninGunu = useMemo(
+    () => new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }),
+    []
+  );
+
   if (yukleniyor) {
     return (
       <View style={styles.merkezle}>
@@ -15,11 +20,6 @@ export default function AnaSayfa() {
       </View>
     );
   }
-
-  const bugunHaftaninGunu = useMemo(
-    () => new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }),
-    []
-  );
 
   return (
     <ScrollView style={styles.ekran} contentContainerStyle={styles.icerik} showsVerticalScrollIndicator={false}>
