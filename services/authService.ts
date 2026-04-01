@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
+import { syncHedefNetBilgisi, checkAndRetrySyncIfNeeded } from './firestoreService';
 
 export interface KayitData {
   isim: string;
@@ -38,13 +39,34 @@ export const kayitOl = async (
     kvkkOnayTarihi: new Date().toISOString(),
     olusturmaTarihi: serverTimestamp(),
     sonGirisTarihi: serverTimestamp(),
+    obpGuncellendi: false,
   });
+  // Arka planda net bilgisini çek (await etme)
+  syncHedefNetBilgisi(
+    user.uid,
+    data.hedefTuru === 'universite' ? data.hedefProgramId : undefined
+  );
   return user;
 };
 
 export const girisYap = async (email: string, sifre: string) => {
   const userCredential = await signInWithEmailAndPassword(auth, email, sifre);
-  return userCredential.user;
+  const user = userCredential.user;
+  // Arka planda net bilgisi senkronizasyonunu kontrol et (await etme)
+  getDoc(doc(db, 'users', user.uid)).then((snap) => {
+    if (snap.exists()) {
+      const userData = snap.data() as {
+        hedefTuru?: string;
+        hedefProgramId?: string;
+      };
+      if (userData.hedefTuru === 'siralama') {
+        checkAndRetrySyncIfNeeded(user.uid);
+      } else if (userData.hedefProgramId) {
+        checkAndRetrySyncIfNeeded(user.uid, userData.hedefProgramId);
+      }
+    }
+  });
+  return user;
 };
 
 export const cikisYap = async () => {
