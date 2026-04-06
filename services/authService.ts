@@ -45,7 +45,7 @@ export const kayitOl = async (
   syncHedefNetBilgisi(
     user.uid,
     data.hedefTuru === 'universite' ? data.hedefProgramId : undefined
-  );
+  ).catch(err => console.error('[authService] kayıt sonrası net sync hatası:', err));
   return user;
 };
 
@@ -65,7 +65,7 @@ export const girisYap = async (email: string, sifre: string) => {
         checkAndRetrySyncIfNeeded(user.uid, userData.hedefProgramId);
       }
     }
-  });
+  }).catch(err => console.error('[authService] giriş sonrası retry check hatası:', err));
   return user;
 };
 

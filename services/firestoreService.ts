@@ -6,7 +6,9 @@ import {
   HedefNetBilgisi,
 } from './yokatlasService';
 
-export type NetFetchStatus = 'pending' | 'done' | 'not_needed';
+export type NetFetchStatus = 'pending' | 'done' | 'not_needed' | 'failed';
+
+const MAX_FETCH_RETRIES = 3;
 
 /**
  * YÖK Atlas'tan net bilgisini çekip Firestore'daki kullanıcı belgesine yazar.
@@ -94,8 +96,8 @@ export const syncHedefNetBilgisi = async (
         netFetchStatus: 'pending' as NetFetchStatus,
       });
     }
-  } catch {
-    // Sessizce başarısız ol
+  } catch (err) {
+    console.error('[firestoreService] syncHedefNetBilgisi hatası:', err);
   }
 };
 
@@ -115,12 +117,19 @@ export const checkAndRetrySyncIfNeeded = async (
     const data = snap.data() as {
       netFetchStatus?: NetFetchStatus;
       hedefTuru?: string;
+      netFetchRetryCount?: number;
     };
 
     if (data.netFetchStatus === 'pending') {
+      const retryCount = data.netFetchRetryCount ?? 0;
+      if (retryCount >= MAX_FETCH_RETRIES) {
+        await updateDoc(userRef, { netFetchStatus: 'failed' as NetFetchStatus });
+        return;
+      }
+      await updateDoc(userRef, { netFetchRetryCount: retryCount + 1 });
       await syncHedefNetBilgisi(uid, programId);
     }
-  } catch {
-    // Sessizce başarısız ol
+  } catch (err) {
+    console.error('[firestoreService] checkAndRetrySyncIfNeeded hatası:', err);
   }
 };

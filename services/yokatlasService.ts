@@ -93,7 +93,10 @@ export const fetchHedefNetBilgisi = async (
   try {
     const url = `https://yokatlas.yok.gov.tr/content/lisans-dynamic/1210a.php?y=${programId}`;
     const response = await fetch(url);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(`[yokatlasService] programId=${programId}: HTTP ${response.status} — ağ veya sunucu hatası`);
+      return null;
+    }
     const html = await response.text();
 
     const parseNet = (label: string): number | undefined => {
@@ -119,6 +122,7 @@ export const fetchHedefNetBilgisi = async (
       tyt_fen === undefined ||
       tyt_sosyal === undefined
     ) {
+      console.warn(`[yokatlasService] programId=${programId}: TYT net verileri parse edilemedi — YÖK Atlas HTML yapısı değişmiş olabilir.`);
       return null;
     }
 
