@@ -50,10 +50,13 @@ export const syncHedefNetBilgisi = async (
       }
 
       const sonuclar: HedefNetBilgisi[] = [];
-      for (const ref of referanslar) {
-        const net = await fetchHedefNetBilgisi(ref.programId);
+      const hedefReferanslar = referanslar.slice(0, 3);
+      for (let i = 0; i < hedefReferanslar.length; i++) {
+        const net = await fetchHedefNetBilgisi(hedefReferanslar[i].programId);
         if (net) sonuclar.push(net);
-        await new Promise(r => setTimeout(r, 500));
+        if (i < hedefReferanslar.length - 1) {
+          await new Promise(r => setTimeout(r, 700));
+        }
       }
 
       if (sonuclar.length === 0) {

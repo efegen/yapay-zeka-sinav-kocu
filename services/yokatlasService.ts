@@ -54,8 +54,16 @@ export const bolumListesiGetir = (
   );
 };
 
+let _programMap: Map<string, YokatlasProgram> | null = null;
+const getProgramMap = (): Map<string, YokatlasProgram> => {
+  if (!_programMap) {
+    _programMap = new Map(programlar.map(p => [p.programId, p]));
+  }
+  return _programMap;
+};
+
 export const programBul = (programId: string): YokatlasProgram | undefined => {
-  return programlar.find(p => p.programId === programId);
+  return getProgramMap().get(programId);
 };
 
 export interface HedefNetBilgisi {
@@ -94,7 +102,8 @@ export const fetchHedefNetBilgisi = async (
     const url = `https://yokatlas.yok.gov.tr/content/lisans-dynamic/1210a.php?y=${programId}`;
     const response = await fetch(url);
     if (!response.ok) {
-      console.warn(`[yokatlasService] programId=${programId}: HTTP ${response.status} — ağ veya sunucu hatası`);
+      const hint = response.status === 429 ? ' — rate limit aşıldı' : ' — ağ veya sunucu hatası';
+      console.warn(`[yokatlasService] programId=${programId}: HTTP ${response.status}${hint}`);
       return null;
     }
     const html = await response.text();
