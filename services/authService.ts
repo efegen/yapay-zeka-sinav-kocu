@@ -40,6 +40,7 @@ export const kayitOl = async (
     olusturmaTarihi: serverTimestamp(),
     sonGirisTarihi: serverTimestamp(),
     obpGuncellendi: false,
+    netFetchStatus: 'pending',
   });
   // Arka planda net bilgisini çek (await etme)
   syncHedefNetBilgisi(
@@ -60,9 +61,11 @@ export const girisYap = async (email: string, sifre: string) => {
         hedefProgramId?: string;
       };
       if (userData.hedefTuru === 'siralama') {
-        checkAndRetrySyncIfNeeded(user.uid);
+        checkAndRetrySyncIfNeeded(user.uid)
+          .catch(err => console.error('[authService] giriş sonrası retry check hatası:', err));
       } else if (userData.hedefProgramId) {
-        checkAndRetrySyncIfNeeded(user.uid, userData.hedefProgramId);
+        checkAndRetrySyncIfNeeded(user.uid, userData.hedefProgramId)
+          .catch(err => console.error('[authService] giriş sonrası retry check hatası:', err));
       }
     }
   }).catch(err => console.error('[authService] giriş sonrası retry check hatası:', err));

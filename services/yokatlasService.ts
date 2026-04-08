@@ -91,92 +91,109 @@ export interface HedefNetBilgisi {
 }
 
 /**
- * YÖK Atlas'tan belirtilen programa yerleşen öğrencilerin net ortalamalarını çeker.
- * Hata durumunda null döndürür, asla throw etmez.
+ * Taban puandan geriye dönük net tahmini hesaplar.
+ * OBP katkısı varsayılan 80 diploma notu (OBP=400) üzerinden çıkarılır.
+ *
+ * TYT puanı  = 100 + toplamTYTNet × 3.85 + OBP × 0.12
+ * AYT puanı  = TYT × 0.4 + toplamAYTNet × 3.5 + OBP × 0.06
+ *
+ * Toplam net, soru sayısı oranlarına göre derslere dağıtılır.
  */
-export const fetchHedefNetBilgisi = async (
+export const hedefNetHesapla = (
   programId: string,
-  year: number = 2025
-): Promise<HedefNetBilgisi | null> => {
-  try {
-    const url = `https://yokatlas.yok.gov.tr/content/lisans-dynamic/1210a.php?y=${programId}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const hint = response.status === 429 ? ' — rate limit aşıldı' : ' — ağ veya sunucu hatası';
-      console.warn(`[yokatlasService] programId=${programId}: HTTP ${response.status}${hint}`);
-      return null;
-    }
-    const html = await response.text();
+): HedefNetBilgisi | null => {
+  const program = programBul(programId);
+  if (!program) return null;
 
-    const parseNet = (label: string): number | undefined => {
-      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const rowRegex = new RegExp(
-        `${escaped}[^<]*<\\/td>[\\s\\S]*?<td[^>]*>\\s*([\\d]+[,.]?[\\d]*)\\s*<\\/td>`,
-        'i'
-      );
-      const match = html.match(rowRegex);
-      if (!match) return undefined;
-      const val = parseFloat(match[1].replace(',', '.'));
-      return isNaN(val) ? undefined : val;
-    };
+  const tabanPuan = parseFloat(program.tabanPuan_2025 ?? '');
+  if (isNaN(tabanPuan) || tabanPuan <= 0) return null;
 
-    const tyt_turkce    = parseNet('TYT Türkçe');
-    const tyt_matematik = parseNet('TYT Temel Matematik');
-    const tyt_fen       = parseNet('TYT Fen Bilimleri');
-    const tyt_sosyal    = parseNet('TYT Sosyal Bilimler');
+  const puanTuru = program.puanTuru;
+  const OBP = 400; // 80 diploma notu varsayımı
 
-    if (
-      tyt_turkce === undefined ||
-      tyt_matematik === undefined ||
-      tyt_fen === undefined ||
-      tyt_sosyal === undefined
-    ) {
-      console.warn(`[yokatlasService] programId=${programId}: TYT net verileri parse edilemedi — YÖK Atlas HTML yapısı değişmiş olabilir.`);
-      return null;
-    }
+  // — TYT toplam net tahmini —
+  // tabanPuan ≈ 100 + toplamTYT × 3.85 + OBP × 0.12
+  // Ancak AYT puanı = TYT × 0.4 + AYT × 3.5 + OBP × 0.06
+  // tabanPuan AYT puanı olduğundan, TYT'yi tahmin için:
+  //   tabanPuan'ın ~%40'ı TYT'den, ~%60'ı AYT'den gelir şeklinde böl
 
-    const result: HedefNetBilgisi = {
-      tyt_turkce,
-      tyt_matematik,
-      tyt_fen,
-      tyt_sosyal,
-      kaynak_yil: year,
-    };
+  // TYT puanını tahmin et: tabanPuanın yaklaşık değerinden
+  // Tipik üst düzey öğrenci: TYT ~95/120, AYT ~65/80
+  // TYT puan ≈ 100 + 95 × 3.85 + 48 ≈ 514
+  // AYT puan ≈ 514 × 0.4 + 65 × 3.5 + 24 ≈ 457
 
-    // SAY
-    const ayt_matematik = parseNet('AYT Matematik');
-    if (ayt_matematik !== undefined) result.ayt_matematik = ayt_matematik;
-    const ayt_fizik = parseNet('AYT Fizik');
-    if (ayt_fizik !== undefined) result.ayt_fizik = ayt_fizik;
-    const ayt_kimya = parseNet('AYT Kimya');
-    if (ayt_kimya !== undefined) result.ayt_kimya = ayt_kimya;
-    const ayt_biyoloji = parseNet('AYT Biyoloji');
-    if (ayt_biyoloji !== undefined) result.ayt_biyoloji = ayt_biyoloji;
+  // Gerçekçi tahmin: tabanPuan = TYT*0.4 + aytNet*3.5 + OBP*0.06
+  // TYT puan = 100 + tytNet*3.85 + OBP*0.12
 
-    // EA / SOZ
-    const ayt_edebiyat = parseNet('AYT Türk Dili ve Edebiyatı');
-    if (ayt_edebiyat !== undefined) result.ayt_edebiyat = ayt_edebiyat;
-    const ayt_tarih1 = parseNet('AYT Tarih-1');
-    if (ayt_tarih1 !== undefined) result.ayt_tarih1 = ayt_tarih1;
-    const ayt_cografya1 = parseNet('AYT Coğrafya-1');
-    if (ayt_cografya1 !== undefined) result.ayt_cografya1 = ayt_cografya1;
-    const ayt_tarih2 = parseNet('AYT Tarih-2');
-    if (ayt_tarih2 !== undefined) result.ayt_tarih2 = ayt_tarih2;
-    const ayt_cografya2 = parseNet('AYT Coğrafya-2');
-    if (ayt_cografya2 !== undefined) result.ayt_cografya2 = ayt_cografya2;
-    const ayt_felsefe = parseNet('AYT Felsefe Grubu');
-    if (ayt_felsefe !== undefined) result.ayt_felsefe = ayt_felsefe;
-    const ayt_din = parseNet('AYT Din Kültürü');
-    if (ayt_din !== undefined) result.ayt_din = ayt_din;
+  // TYT puanını tabanPuandan çıkar:
+  // tabanPuan = tytPuan * 0.4 + aytNet * 3.5 + OBP * 0.06
+  // tytPuan = 100 + tytNet * 3.85 + OBP * 0.12
 
-    // DIL — YDT Yabancı Dil (İngilizce, Almanca, vb.)
-    const ayt_yabancidil = parseNet('YDT Yabancı Dil');
-    if (ayt_yabancidil !== undefined) result.ayt_yabancidil = ayt_yabancidil;
+  // TYT soru dağılımı: Türkçe 40, Mat 40, Fen 20, Sosyal 20 = 120
+  const TYT_TOPLAM_SORU = 120;
+  // AYT soru dağılımı puan türüne göre değişir, hepsi toplam 80
+  const AYT_TOPLAM_SORU = 80;
 
-    return result;
-  } catch {
-    return null;
+  // Net oran: Puan yükseldikçe net oranı da yükselir
+  // Minimum puan ~180 (ham), Maksimum ~560
+  // tabanPuan-180 → 0% doğruluk, 560 → ~95% doğruluk
+  const tytNetOran = Math.min(Math.max((tabanPuan - 180) / (560 - 180), 0.1), 0.95);
+  const aytNetOran = Math.min(Math.max((tabanPuan - 200) / (560 - 200), 0.05), 0.95);
+
+  const tytToplamNet = Math.round(tytNetOran * TYT_TOPLAM_SORU * 10) / 10;
+  const aytToplamNet = Math.round(aytNetOran * AYT_TOPLAM_SORU * 10) / 10;
+
+  // Doğrulama: hesaplanan AYT puanını kontrol et
+  const tytPuan = 100 + tytToplamNet * 3.85 + OBP * 0.12;
+  const aytPuanHesap = tytPuan * 0.4 + aytToplamNet * 3.5 + OBP * 0.06;
+
+  // Fark varsa AYT net'i ayarla
+  let duzeltilmisAytNet = aytToplamNet;
+  if (aytPuanHesap > 0) {
+    const fark = tabanPuan - aytPuanHesap;
+    duzeltilmisAytNet = Math.max(0, Math.round((aytToplamNet + fark / 3.5) * 10) / 10);
+    duzeltilmisAytNet = Math.min(duzeltilmisAytNet, AYT_TOPLAM_SORU);
   }
+
+  // TYT netleri dağıt (soru sayısı oranında)
+  const r = (net: number) => Math.round(net * 10) / 10;
+  const tyt_turkce    = r(tytToplamNet * (40 / TYT_TOPLAM_SORU));
+  const tyt_matematik = r(tytToplamNet * (40 / TYT_TOPLAM_SORU));
+  const tyt_fen       = r(tytToplamNet * (20 / TYT_TOPLAM_SORU));
+  const tyt_sosyal    = r(tytToplamNet * (20 / TYT_TOPLAM_SORU));
+
+  const result: HedefNetBilgisi = {
+    tyt_turkce,
+    tyt_matematik,
+    tyt_fen,
+    tyt_sosyal,
+    kaynak_yil: 2025,
+  };
+
+  // AYT netleri puan türüne göre dağıt
+  if (puanTuru === 'SAY') {
+    result.ayt_matematik = r(duzeltilmisAytNet * (40 / AYT_TOPLAM_SORU));
+    result.ayt_fizik     = r(duzeltilmisAytNet * (14 / AYT_TOPLAM_SORU));
+    result.ayt_kimya     = r(duzeltilmisAytNet * (13 / AYT_TOPLAM_SORU));
+    result.ayt_biyoloji  = r(duzeltilmisAytNet * (13 / AYT_TOPLAM_SORU));
+  } else if (puanTuru === 'EA') {
+    result.ayt_matematik = r(duzeltilmisAytNet * (40 / AYT_TOPLAM_SORU));
+    result.ayt_edebiyat  = r(duzeltilmisAytNet * (24 / AYT_TOPLAM_SORU));
+    result.ayt_cografya1 = r(duzeltilmisAytNet * (6 / AYT_TOPLAM_SORU));
+    result.ayt_tarih1    = r(duzeltilmisAytNet * (10 / AYT_TOPLAM_SORU));
+  } else if (puanTuru === 'SOZ') {
+    result.ayt_edebiyat  = r(duzeltilmisAytNet * (24 / AYT_TOPLAM_SORU));
+    result.ayt_tarih1    = r(duzeltilmisAytNet * (10 / AYT_TOPLAM_SORU));
+    result.ayt_cografya1 = r(duzeltilmisAytNet * (6 / AYT_TOPLAM_SORU));
+    result.ayt_tarih2    = r(duzeltilmisAytNet * (11 / AYT_TOPLAM_SORU));
+    result.ayt_cografya2 = r(duzeltilmisAytNet * (11 / AYT_TOPLAM_SORU));
+    result.ayt_felsefe   = r(duzeltilmisAytNet * (12 / AYT_TOPLAM_SORU));
+    result.ayt_din       = r(duzeltilmisAytNet * (6 / AYT_TOPLAM_SORU));
+  } else if (puanTuru === 'DIL') {
+    result.ayt_yabancidil = r(duzeltilmisAytNet);
+  }
+
+  return result;
 };
 
 export interface ReferenceProgram {

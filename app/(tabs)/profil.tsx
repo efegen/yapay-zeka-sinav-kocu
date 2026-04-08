@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import {
@@ -22,7 +22,8 @@ import {
 import { deleteDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../../services/firebaseConfig';
 import { cikisYap } from '../../services/authService';
-import { useProfile } from '../../hooks/useProfile';
+import { manuelSyncHedefNet } from '../../services/firestoreService';
+import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
 
 type AktifModal = null | 'sifre' | 'bildirim' | 'kvkk' | 'hesapSil' | 'cikis';
@@ -118,9 +119,23 @@ export default function Profil() {
         <View style={styles.kart}>
           <BilgiSatiri ikon="school-outline" etiket="Sınıf" deger={profil?.sinif ? `${profil.sinif}. Sınıf` : '—'} />
           <BilgiSatiri ikon="trophy-outline" etiket="Puan Türü" deger={profil?.puanTuru ?? '—'} />
-          <BilgiSatiri ikon="flag-outline" etiket="Hedef Üniversite" deger={profil?.hedefUniversite ?? '—'} />
-          <BilgiSatiri ikon="book-outline" etiket="Hedef Bölüm" deger={profil?.hedefBolum ?? '—'} son />
+          {profil?.hedefTuru === 'siralama' ? (
+            <BilgiSatiri
+              ikon="podium-outline"
+              etiket="Hedef Sıralama"
+              deger={profil.hedefSiralama ? profil.hedefSiralama.toLocaleString('tr-TR') + '. sıra' : '—'}
+              son
+            />
+          ) : (
+            <>
+              <BilgiSatiri ikon="flag-outline" etiket="Hedef Üniversite" deger={profil?.hedefUniversite ?? '—'} />
+              <BilgiSatiri ikon="book-outline" etiket="Hedef Bölüm" deger={profil?.hedefBolum ?? '—'} son />
+            </>
+          )}
         </View>
+
+        {/* Hedef Netler kartı */}
+        {profil && <HedefNetlerKarti profil={profil} />}
 
         {/* Ayarlar & Güvenlik */}
         <Text style={styles.bolumBaslik}>Ayarlar ve Güvenlik</Text>
@@ -264,6 +279,114 @@ export default function Profil() {
         </View>
       </Modal>
 
+    </View>
+  );
+}
+
+function HedefNetlerKarti({ profil }: { profil: ProfilType }) {
+  const { hedefNetBilgisi, netFetchStatus, puanTuru } = profil;
+  const [yenileniyor, setYenileniyor] = useState(false);
+  const otomatikDenendi = useRef(false);
+
+  async function yenidenDene() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setYenileniyor(true);
+    await manuelSyncHedefNet(
+      uid,
+      profil.hedefTuru === 'universite' ? profil.hedefProgramId : undefined
+    );
+    setYenileniyor(false);
+  }
+
+  // Veri yoksa sayfa açıldığında otomatik bir kez dene
+  useEffect(() => {
+    if (netFetchStatus === 'done' || otomatikDenendi.current) return;
+    otomatikDenendi.current = true;
+    yenidenDene();
+  }, []);
+
+  if (netFetchStatus === 'not_needed') return null;
+
+  // Veri henüz yok — yenileniyor veya bekliyor
+  if (netFetchStatus !== 'done' || !hedefNetBilgisi) {
+    return (
+      <View style={styles.netKarti}>
+        <Text style={styles.netBaslik}>Hedef Netler</Text>
+        {yenileniyor ? (
+          <ActivityIndicator size="small" color={COLORS.primary} style={{ marginTop: 10 }} />
+        ) : (
+          <>
+            <Text style={styles.netHata}>Net verisi henüz hesaplanamadı.</Text>
+            <TouchableOpacity
+              style={styles.netYenileBtn}
+              onPress={yenidenDene}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.netYenileBtnMetin}>Yeniden Dene</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  const tytNetleri = [
+    { label: 'Türkçe', val: hedefNetBilgisi.tyt_turkce },
+    { label: 'Mat', val: hedefNetBilgisi.tyt_matematik },
+    { label: 'Fen', val: hedefNetBilgisi.tyt_fen },
+    { label: 'Sosyal', val: hedefNetBilgisi.tyt_sosyal },
+  ].filter(n => n.val != null);
+
+  const aytNetleri: { label: string; val: number }[] = [];
+  if (puanTuru === 'SAY') {
+    if (hedefNetBilgisi.ayt_matematik != null) aytNetleri.push({ label: 'Mat', val: hedefNetBilgisi.ayt_matematik });
+    if (hedefNetBilgisi.ayt_fizik != null) aytNetleri.push({ label: 'Fizik', val: hedefNetBilgisi.ayt_fizik });
+    if (hedefNetBilgisi.ayt_kimya != null) aytNetleri.push({ label: 'Kimya', val: hedefNetBilgisi.ayt_kimya });
+    if (hedefNetBilgisi.ayt_biyoloji != null) aytNetleri.push({ label: 'Bio', val: hedefNetBilgisi.ayt_biyoloji });
+  } else if (puanTuru === 'EA') {
+    if (hedefNetBilgisi.ayt_edebiyat != null) aytNetleri.push({ label: 'Edb', val: hedefNetBilgisi.ayt_edebiyat });
+    if (hedefNetBilgisi.ayt_tarih1 != null) aytNetleri.push({ label: 'Tar1', val: hedefNetBilgisi.ayt_tarih1 });
+    if (hedefNetBilgisi.ayt_cografya1 != null) aytNetleri.push({ label: 'Coğ1', val: hedefNetBilgisi.ayt_cografya1 });
+    if (hedefNetBilgisi.ayt_matematik != null) aytNetleri.push({ label: 'Mat', val: hedefNetBilgisi.ayt_matematik });
+  } else if (puanTuru === 'SOZ') {
+    if (hedefNetBilgisi.ayt_edebiyat != null) aytNetleri.push({ label: 'Edb', val: hedefNetBilgisi.ayt_edebiyat });
+    if (hedefNetBilgisi.ayt_tarih1 != null) aytNetleri.push({ label: 'Tar1', val: hedefNetBilgisi.ayt_tarih1 });
+    if (hedefNetBilgisi.ayt_tarih2 != null) aytNetleri.push({ label: 'Tar2', val: hedefNetBilgisi.ayt_tarih2 });
+    if (hedefNetBilgisi.ayt_cografya1 != null) aytNetleri.push({ label: 'Coğ1', val: hedefNetBilgisi.ayt_cografya1 });
+    if (hedefNetBilgisi.ayt_cografya2 != null) aytNetleri.push({ label: 'Coğ2', val: hedefNetBilgisi.ayt_cografya2 });
+    if (hedefNetBilgisi.ayt_felsefe != null) aytNetleri.push({ label: 'Fels', val: hedefNetBilgisi.ayt_felsefe });
+    if (hedefNetBilgisi.ayt_din != null) aytNetleri.push({ label: 'Din', val: hedefNetBilgisi.ayt_din });
+  } else if (puanTuru === 'DIL') {
+    if (hedefNetBilgisi.ayt_yabancidil != null) aytNetleri.push({ label: 'Yab.Dil', val: hedefNetBilgisi.ayt_yabancidil });
+  }
+
+  return (
+    <View style={styles.netKarti}>
+      <View style={styles.netBaslikSatir}>
+        <Text style={styles.netBaslik}>Hedef Netler</Text>
+        {hedefNetBilgisi.kaynak_yil ? (
+          <Text style={styles.netYil}>{hedefNetBilgisi.kaynak_yil} verisi</Text>
+        ) : null}
+      </View>
+      {tytNetleri.length > 0 && <NetSatiri bolum="TYT" netler={tytNetleri} />}
+      {aytNetleri.length > 0 && <NetSatiri bolum={`AYT${puanTuru ? ` (${puanTuru})` : ''}`} netler={aytNetleri} />}
+    </View>
+  );
+}
+
+function NetSatiri({ bolum, netler }: { bolum: string; netler: { label: string; val: number }[] }) {
+  return (
+    <View style={styles.netSatir}>
+      <Text style={styles.netBolumEtiket}>{bolum}</Text>
+      <View style={styles.netChipRow}>
+        {netler.map(({ label, val }) => (
+          <View key={label} style={styles.netChip}>
+            <Text style={styles.netChipEtiket}>{label}</Text>
+            <Text style={styles.netChipDeger}>{val}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -424,4 +547,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, height: 48,
   },
   sifreInput: { flex: 1, fontSize: 15, color: COLORS.text },
+
+  netKarti: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    padding: 14,
+    marginBottom: 12,
+  },
+  netBaslikSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  netBaslik: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  netYil: { fontSize: 11, color: COLORS.textLight },
+  netSatir: { marginBottom: 8 },
+  netBolumEtiket: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 5 },
+  netChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  netChip: {
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  netChipEtiket: { fontSize: 11, color: COLORS.textSecondary },
+  netChipDeger: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+
+  netHata: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, marginBottom: 8 },
+  netYenileBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  netYenileBtnMetin: { fontSize: 12, fontWeight: '600', color: COLORS.primary },
 });
