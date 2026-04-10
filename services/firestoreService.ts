@@ -1,4 +1,16 @@
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  collection,
+  addDoc,
+  getDocs,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  Timestamp,
+} from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import {
   hedefNetHesapla,
@@ -131,4 +143,94 @@ export const checkAndRetrySyncIfNeeded = async (
   } catch (err) {
     console.error('[firestoreService] checkAndRetrySyncIfNeeded hatası:', err);
   }
+};
+
+// ─────────────────────────────────────────────
+// Görev (task) types & Firestore helpers
+// ─────────────────────────────────────────────
+
+export type GorevTip = 'planned' | 'anytime';
+
+export interface Gorev {
+  id: string;
+  baslik: string;
+  sure: number; // minutes
+  tip: GorevTip;
+  tarih: Timestamp | null; // only set when tip === 'planned'
+  tamamlandi: boolean;
+  olusturmaTarihi: Timestamp;
+}
+
+export const gorevEkle = async (
+  uid: string,
+  gorev: Omit<Gorev, 'id' | 'olusturmaTarihi'>
+): Promise<void> => {
+  const kolRef = collection(db, 'users', uid, 'gorevler');
+  await addDoc(kolRef, {
+    ...gorev,
+    olusturmaTarihi: Timestamp.now(),
+  });
+};
+
+/**
+ * Returns tasks for a given calendar day.
+ *
+ * IMPORTANT — two composite Firestore indexes are required on the `gorevler` subcollection:
+ *   1. planned query  → fields: tip ASC, tarih ASC
+ *   2. anytime query  → fields: tip ASC, tamamlandi ASC, olusturmaTarihi ASC
+ * Create them in Firebase Console → Firestore Database → Indexes → Composite → Add index.
+ */
+export const gunGorevleriniGetir = async (
+  uid: string,
+  tarih: Date
+): Promise<{ planned: Gorev[]; anytime: Gorev[] }> => {
+  const kolRef = collection(db, 'users', uid, 'gorevler');
+
+  const gunBaslangic = new Date(tarih);
+  gunBaslangic.setHours(0, 0, 0, 0);
+  const gunBitis = new Date(tarih);
+  gunBitis.setHours(23, 59, 59, 999);
+
+  // Composite index required: tip ASC, tarih ASC
+  const plannedQuery = query(
+    kolRef,
+    where('tip', '==', 'planned'),
+    where('tarih', '>=', Timestamp.fromDate(gunBaslangic)),
+    where('tarih', '<=', Timestamp.fromDate(gunBitis)),
+    orderBy('tarih', 'asc')
+  );
+
+  // Composite index required: tip ASC, tamamlandi ASC, olusturmaTarihi ASC
+  const anytimeQuery = query(
+    kolRef,
+    where('tip', '==', 'anytime'),
+    where('tamamlandi', '==', false),
+    orderBy('olusturmaTarihi', 'asc')
+  );
+
+  const [plannedSnap, anytimeSnap] = await Promise.all([
+    getDocs(plannedQuery),
+    getDocs(anytimeQuery),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const planned: Gorev[] = plannedSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anytime: Gorev[] = anytimeSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+  return { planned, anytime };
+};
+
+export const gorevTamamla = async (
+  uid: string,
+  gorevId: string,
+  tamamlandi: boolean
+): Promise<void> => {
+  const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
+  await updateDoc(gorevRef, { tamamlandi });
+};
+
+export const gorevSil = async (uid: string, gorevId: string): Promise<void> => {
+  const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
+  await deleteDoc(gorevRef);
 };
