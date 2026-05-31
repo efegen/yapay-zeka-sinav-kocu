@@ -8,7 +8,6 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +24,7 @@ import { cikisYap } from '../../services/authService';
 import { manuelSyncHedefNet } from '../../services/firestoreService';
 import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
+import { bildir } from '../../utils/bildirim';
 
 type AktifModal = null | 'sifre' | 'bildirim' | 'kvkk' | 'hesapSil' | 'cikis';
 
@@ -60,7 +60,7 @@ export default function Profil() {
       await reauthenticateWithCredential(kullanici, kred);
       await updatePassword(kullanici, yeniSifre);
       modalKapat();
-      Alert.alert('Başarılı', 'Şifren güncellendi.');
+      bildir('Başarılı', 'Şifren güncellendi.');
     } catch {
       setSifreHata('Mevcut şifre hatalı veya bir sorun oluştu.');
     } finally {

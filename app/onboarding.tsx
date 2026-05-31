@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, Alert,
+  ScrollView, ActivityIndicator,
   KeyboardAvoidingView, Platform, Modal, FlatList,
   SafeAreaView,
 } from 'react-native';
@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { kayitOl } from '../services/authService';
+import { bildir } from '../utils/bildirim';
 import { diplomaEtkisiAcikla } from '../utils/puanHesapla';
 import {
   universiteAramaYap,
@@ -148,31 +149,31 @@ export default function OnboardingScreen() {
     }
     if (adim === 2) {
       if (!sinif || !okulTuru) {
-        Alert.alert('Eksik bilgi', 'Sınıf ve okul türü seçin.'); return false;
+        bildir('Eksik bilgi', 'Sınıf ve okul türü seçin.'); return false;
       }
       const not = parseFloat(diplomaNotu);
       if (!diplomaNotu || isNaN(not) || not < 0 || not > 100) {
-        Alert.alert('Geçersiz not', 'Diploma notunu 0-100 arası girin.'); return false;
+        bildir('Geçersiz not', 'Diploma notunu 0-100 arası girin.'); return false;
       }
       if (sinif === 'mezun' && gecenYilYerlesti === null) {
-        Alert.alert('Eksik bilgi', 'Geçen yıl bir programa yerleşip yerleşmediğini belirt.'); return false;
+        bildir('Eksik bilgi', 'Geçen yıl bir programa yerleşip yerleşmediğini belirt.'); return false;
       }
     }
     if (adim === 3 && !puanTuru) {
-      Alert.alert('Eksik bilgi', 'Puan türü seçin.'); return false;
+      bildir('Eksik bilgi', 'Puan türü seçin.'); return false;
     }
     if (adim === 4) {
       if (hedefTuru === 'universite' && (!hedefUniversite.trim() || !secilenProgram)) {
-        Alert.alert('Eksik bilgi', 'Üniversite ve bölüm seçin.'); return false;
+        bildir('Eksik bilgi', 'Üniversite ve bölüm seçin.'); return false;
       }
       if (hedefTuru === 'siralama') {
         const s = parseInt(hedefSiralama);
         const maks = SIRALAMA_MAKS[puanTuru] || 2_500_000;
         if (!hedefSiralama || isNaN(s) || s < 1) {
-          Alert.alert('Geçersiz sıralama', 'Geçerli bir hedef sıralaması girin.'); return false;
+          bildir('Geçersiz sıralama', 'Geçerli bir hedef sıralaması girin.'); return false;
         }
         if (s > maks) {
-          Alert.alert(
+          bildir(
             'Gerçekçi olmayan sıralama',
             `${puanTuru || 'Seçilen'} puan türünde ${maks.toLocaleString('tr-TR')} üzeri sıralama bulunmamaktadır. Lütfen geçerli bir değer girin.`
           );
@@ -193,7 +194,7 @@ export default function OnboardingScreen() {
   const tamamla = async () => {
     const soruSayisi = ozelSoru ? parseInt(ozelSoru) : gunlukSoru;
     if (!haftaCalisma || !soruSayisi) {
-      Alert.alert('Eksik bilgi', 'Çalışma planını tamamlayın.'); return;
+      bildir('Eksik bilgi', 'Çalışma planını tamamlayın.'); return;
     }
     setYukleniyor(true);
     try {
@@ -215,7 +216,7 @@ export default function OnboardingScreen() {
       });
       router.replace('/(tabs)');
     } catch (e: any) {
-      Alert.alert('Kayıt başarısız', e.message || 'Bir hata oluştu.');
+      bildir('Kayıt başarısız', e.message || 'Bir hata oluştu.');
     } finally {
       setYukleniyor(false);
     }

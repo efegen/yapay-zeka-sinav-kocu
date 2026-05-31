@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Alert,
+  StyleSheet, ActivityIndicator,
   KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { girisYap } from '../services/authService';
+import { bildir } from '../utils/bildirim';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -16,7 +17,7 @@ export default function LoginScreen() {
 
   const handleGiris = async () => {
     if (!email || !sifre) {
-      Alert.alert('Hata', 'Email ve şifre alanlarını doldurun.');
+      bildir('Hata', 'Email ve şifre alanlarını doldurun.');
       return;
     }
     setYukleniyor(true);
@@ -24,7 +25,7 @@ export default function LoginScreen() {
       await girisYap(email, sifre);
       router.replace('/(tabs)');
     } catch (e: any) {
-      Alert.alert('Giriş Başarısız', 'Email veya şifre hatalı.');
+      bildir('Giriş Başarısız', 'Email veya şifre hatalı.');
     } finally {
       setYukleniyor(false);
     }

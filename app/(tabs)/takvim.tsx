@@ -11,7 +11,6 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -26,6 +25,7 @@ import {
   gunGorevleriniGetir,
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
+import { bildir } from '../../utils/bildirim';
 
 const PRIMARY = COLORS.primary;
 const TEAL = '#00BFA5';
@@ -133,7 +133,7 @@ export default function Takvim() {
   }
 
   function silOnay(gorevId: string, baslik: string) {
-    Alert.alert(
+    bildir(
       'Görevi Sil',
       `"${baslik}" görevini silmek istediğinizden emin misiniz?`,
       [
