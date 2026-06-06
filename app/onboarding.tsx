@@ -321,8 +321,9 @@ export default function OnboardingScreen() {
                   {kvkk2 && <Text style={styles.checkmark}>✓</Text>}
                 </View>
                 <Text style={styles.kvkkYazi}>
-                  Yapay zeka analizleri için eğitim verilerimin işlenmesine
-                  izin veriyorum.
+                  Yapay zeka koçluğu ve analizleri için profil ve akademik
+                  verilerimin AI hizmet sağlayıcısına (OpenAI) gönderilerek
+                  işlenmesine izin veriyorum.
                 </Text>
               </TouchableOpacity>
             </View>

@@ -1,0 +1,7 @@
+name = "yzdsk-ai"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# OPENAI_API_KEY bir SECRET'tır, buraya YAZILMAZ.
+# Deploy'dan önce şu komutla bir kez girilir:
+#   npx wrangler secret put OPENAI_API_KEY
