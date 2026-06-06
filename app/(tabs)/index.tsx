@@ -1,17 +1,46 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TouchableOpacity,
+  Animated,
+  Easing,
+  Platform,
+} from 'react-native';
+import { useEffect, useMemo, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useProfile } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
+import { YKS_TARIHI, YKS_SEZON_BASLANGIC, YKS_YIL } from '../../constants/sinav';
+import { gunFarki, tarihUzun, aralikOrani } from '../../utils/tarih';
+
+const GUNLER = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+const AYLAR = [
+  'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+];
+
+// AYT alan dersleri — puan türüne göre hedef net toplamı için.
+const AYT_ALANLARI: Record<string, string[]> = {
+  SAY: ['ayt_matematik', 'ayt_fizik', 'ayt_kimya', 'ayt_biyoloji'],
+  EA: ['ayt_matematik', 'ayt_edebiyat', 'ayt_tarih1', 'ayt_cografya1'],
+  SOZ: ['ayt_edebiyat', 'ayt_tarih1', 'ayt_tarih2', 'ayt_cografya1', 'ayt_cografya2', 'ayt_felsefe', 'ayt_din'],
+  DIL: ['ayt_yabancidil'],
+};
 
 export default function AnaSayfa() {
   const { profil, yukleniyor } = useProfile();
+  const router = useRouter();
 
-  const bugunHaftaninGunu = useMemo(
-    () => new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }),
-    []
-  );
+  const bugun = useMemo(() => new Date(), []);
+  const tarihMetni = `${GUNLER[bugun.getDay()]} · ${bugun.getDate()} ${AYLAR[bugun.getMonth()]}`;
+  const kalanGun = useMemo(() => gunFarki(YKS_TARIHI), []);
+  const sinavTarihMetni = useMemo(() => tarihUzun(YKS_TARIHI), []);
+  const sezonOrani = useMemo(() => aralikOrani(YKS_SEZON_BASLANGIC, YKS_TARIHI), []);
 
   if (yukleniyor) {
     return (
@@ -21,104 +50,492 @@ export default function AnaSayfa() {
     );
   }
 
+  const ilkAd = profil?.isim?.trim().split(' ')[0] || 'Öğrenci';
+  const harf = (profil?.isim?.trim()?.[0] || '?').toUpperCase();
+  const puanTuru = profil?.puanTuru;
+
+  // ── Hedef özeti (üniversite/bölüm veya sıralama) ──
+  const hedefMetni =
+    profil?.hedefTuru === 'siralama' && profil?.hedefSiralama
+      ? `${profil.hedefSiralama.toLocaleString('tr-TR')}. sıra`
+      : profil?.hedefUniversite
+        ? `${profil.hedefUniversite.split(' ')[0]}${profil.hedefBolum ? ' · ' + profil.hedefBolum.split(' ')[0] : ''}`
+        : 'Hedef belirle';
+
+  // ── Hedef netler (gerçek veri: hedefNetBilgisi) ──
+  const hedefNet = profil?.hedefNetBilgisi;
+  const netHazir = profil?.netFetchStatus === 'done' && !!hedefNet;
+
+  const topla = (keys: string[]): number | null => {
+    if (!hedefNet) return null;
+    let toplam = 0;
+    let bulundu = false;
+    for (const k of keys) {
+      const v = hedefNet[k];
+      if (typeof v === 'number') {
+        toplam += v;
+        bulundu = true;
+      }
+    }
+    return bulundu ? Math.round(toplam * 10) / 10 : null;
+  };
+
+  const tytHedef = topla(['tyt_turkce', 'tyt_matematik', 'tyt_fen', 'tyt_sosyal']);
+  const aytHedef = topla(AYT_ALANLARI[puanTuru ?? ''] ?? []);
+  const toplamHedef =
+    tytHedef != null || aytHedef != null
+      ? Math.round(((tytHedef ?? 0) + (aytHedef ?? 0)) * 10) / 10
+      : null;
+
+  const siralamaHedefVar = profil?.hedefTuru === 'siralama' && typeof profil?.hedefSiralama === 'number';
+
   return (
-    <ScrollView style={styles.ekran} contentContainerStyle={styles.icerik} showsVerticalScrollIndicator={false}>
-      {/* Üst başlık */}
+    <ScrollView
+      style={styles.ekran}
+      contentContainerStyle={styles.icerik}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* ─── Başlık ─── */}
       <View style={styles.baslik}>
-        <View>
-          <Text style={styles.tarih}>{bugunHaftaninGunu}</Text>
-          <Text style={styles.selam}>
-            Merhaba, {profil?.isim?.split(' ')[0] ?? 'Öğrenci'} 👋
+        <View style={{ flex: 1 }}>
+          <Text style={styles.tarih}>{tarihMetni}</Text>
+          <Text style={styles.selam} numberOfLines={1}>Merhaba, {ilkAd}</Text>
+        </View>
+        <View style={styles.baslikSag}>
+          {!!puanTuru && (
+            <View style={styles.puanBadge}>
+              <Text style={styles.puanMetin}>{puanTuru}</Text>
+            </View>
+          )}
+          <LinearGradient
+            colors={[COLORS.primary, COLORS.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatar}
+          >
+            <Text style={styles.avatarHarf}>{harf}</Text>
+          </LinearGradient>
+        </View>
+      </View>
+
+      {/* ─── ★ Kalıcı AI Koç sor çubuğu ─── */}
+      <Yukselen gecikme={40}>
+        <TouchableOpacity
+          style={styles.sorCubugu}
+          activeOpacity={0.85}
+          onPress={() => router.push('/(tabs)/ai-koc' as any)}
+        >
+          <LinearGradient
+            colors={[COLORS.primary, COLORS.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.sorIkon}
+          >
+            <Ionicons name="sparkles" size={15} color="#fff" />
+          </LinearGradient>
+          <Text style={styles.sorMetin} numberOfLines={1}>
+            AI Koç’a sor: <Text style={styles.sorMetinVurgu}>“Limit nasıl çalışılır?”</Text>
+          </Text>
+          <View style={styles.sorGonder}>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
+          </View>
+        </TouchableOpacity>
+      </Yukselen>
+
+      {/* ─── Geri sayım (hero) ─── */}
+      <Yukselen gecikme={20}>
+        <View style={styles.heroGolge}>
+          <LinearGradient
+            colors={['#6D28D9', COLORS.primary, COLORS.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
+          >
+            <View style={styles.heroDaire1} />
+            <View style={styles.heroDaire2} />
+
+            <View style={styles.heroUst}>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={styles.heroEtiket}>YKS {YKS_YIL}’YA KALAN</Text>
+                <View style={styles.heroSayiSatir}>
+                  <Text style={styles.heroSayi}>{kalanGun}</Text>
+                  <Text style={styles.heroGun}>gün</Text>
+                </View>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.heroSinavEtiket}>Sınav</Text>
+                <Text style={styles.heroSinavTarih}>{sinavTarihMetni}</Text>
+                <View style={styles.heroPill}>
+                  <Ionicons
+                    name={siralamaHedefVar ? 'podium' : 'flag'}
+                    size={12}
+                    color="#fff"
+                  />
+                  <Text style={styles.heroPillMetin} numberOfLines={1}>{hedefMetni}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.heroAlt}>
+              <View style={styles.heroAltSatir}>
+                <Text style={styles.heroAltMetin}>Hazırlık sezonu</Text>
+                <Text style={styles.heroAltMetin}>%{Math.round(sezonOrani * 100)}</Text>
+              </View>
+              <View style={styles.heroRay}>
+                <View style={[styles.heroDolgu, { width: `${Math.round(sezonOrani * 100)}%` }]} />
+              </View>
+            </View>
+          </LinearGradient>
+        </View>
+      </Yukselen>
+
+      {/* ─── İkili satır: Seri · Günlük soru ─── */}
+      <Yukselen gecikme={120}>
+        <View style={styles.ikiliRow}>
+          {/* Çalışma serisi — veri yok (dürüst boş durum) */}
+          <View style={[styles.kart, styles.seriKart]}>
+            <View style={styles.kartUstSatir}>
+              <View style={[styles.ikonKutu, { backgroundColor: '#FFEFD6' }]}>
+                <Ionicons name="flame" size={20} color={COLORS.amber} />
+              </View>
+              <YakindaPill />
+            </View>
+            <Text style={styles.seriSayi}>—</Text>
+            <Text style={styles.mikroEtiket}>çalışma serisi</Text>
+            <Text style={styles.kartNot}>Seri takibi yakında</Text>
+          </View>
+
+          {/* Günlük soru — hedef gerçek, çözüm takibi yok */}
+          <View style={[styles.kart, styles.soruKart]}>
+            <View style={styles.kartUstSatir}>
+              <View style={[styles.ikonKutu, { backgroundColor: COLORS.primaryLight }]}>
+                <Ionicons name="create-outline" size={19} color={COLORS.primary} />
+              </View>
+            </View>
+            <View style={styles.halkaSarici}>
+              <View style={styles.halkaTrack} />
+              <View style={styles.halkaMerkez}>
+                <Text style={styles.halkaSayi}>{profil?.gunlukSoruHedefi ?? '—'}</Text>
+                <Text style={styles.halkaAlt}>hedef</Text>
+              </View>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.mikroEtiket}>Günlük soru</Text>
+              <Text style={styles.kartNot}>Çözüm takibi yakında</Text>
+            </View>
+          </View>
+        </View>
+      </Yukselen>
+
+      {/* ─── Hedef netlerin (gerçek veri) ─── */}
+      <Yukselen gecikme={200}>
+        <View style={styles.kart}>
+          <View style={styles.netBaslikSatir}>
+            <View style={styles.satirSol}>
+              <Ionicons name="locate" size={16} color={COLORS.accent} />
+              <Text style={styles.kartBaslik}>Hedef netlerin</Text>
+            </View>
+            {netHazir && toplamHedef != null && (
+              <Text style={styles.netToplam}>
+                Toplam <Text style={styles.netToplamSayi}>{toplamHedef}</Text>
+              </Text>
+            )}
+          </View>
+
+          {netHazir ? (
+            <View style={styles.netGovde}>
+              {([
+                { ad: 'TYT', deger: tytHedef, max: 120, renk: COLORS.primary },
+                { ad: 'AYT', deger: aytHedef, max: 80, renk: COLORS.accent },
+              ] as const).map((n) => (
+                <View key={n.ad} style={{ flex: 1 }}>
+                  <Text style={styles.netDers}>{n.ad} hedef</Text>
+                  <View style={styles.netDegerSatir}>
+                    <Text style={styles.netDeger}>{n.deger ?? '—'}</Text>
+                    <Text style={styles.netMax}>/ {n.max}</Text>
+                  </View>
+                  <View style={styles.netRay}>
+                    <View
+                      style={[
+                        styles.netDolgu,
+                        { width: `${Math.min(100, ((n.deger ?? 0) / n.max) * 100)}%`, backgroundColor: n.renk },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.bosSatir}>
+              <Text style={styles.kartNot}>
+                Hedef netlerin profil ekranında hesaplanıyor. Hesaplanınca burada görünecek.
+              </Text>
+            </View>
+          )}
+        </View>
+      </Yukselen>
+
+      {/* ─── Tahmini sıralama — current rank takibi yok ─── */}
+      <Yukselen gecikme={280}>
+        <View style={styles.kart}>
+          <View style={styles.netBaslikSatir}>
+            <View style={styles.satirSol}>
+              <Ionicons name="podium" size={16} color={COLORS.primary} />
+              <Text style={styles.kartBaslik}>Tahmini sıralama</Text>
+            </View>
+            <YakindaPill />
+          </View>
+
+          <View style={styles.siraGovde}>
+            <Text style={styles.siraDeger}>—</Text>
+            <Text style={styles.siraAlt}>şu anki sıran</Text>
+          </View>
+
+          <Text style={styles.kartNot}>
+            {siralamaHedefVar
+              ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Denemelerini ekledikçe tahmini sıralaman burada oluşacak.`
+              : 'Denemelerini ekledikçe tahmini sıralaman burada görünecek.'}
           </Text>
         </View>
-        <View style={styles.puanBadge}>
-          <Text style={styles.puanMetin}>{profil?.puanTuru ?? '—'}</Text>
-        </View>
-      </View>
+      </Yukselen>
 
-      {/* Hedef kartı */}
-      <View style={styles.kart}>
-        <View style={styles.kartBaslik}>
-          <Ionicons name="flag-outline" size={18} color={COLORS.primary} />
-          <Text style={styles.kartBaslikMetin}>Hedefin</Text>
-        </View>
-        <Text style={styles.hedefUniversite}>{profil?.hedefUniversite ?? '—'}</Text>
-        <Text style={styles.hedefBolum}>{profil?.hedefBolum ?? '—'}</Text>
-      </View>
+      {/* ─── ★ AI Koç · Günün analizi (koyu) — içgörü yakında ─── */}
+      <Yukselen gecikme={360}>
+        <View style={styles.analizKart}>
+          <View style={styles.analizUst}>
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.accent]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.analizIkon}
+            >
+              <Ionicons name="sparkles" size={18} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.analizMikro}>AI KOÇ · GÜNÜN ANALİZİ</Text>
+              <Text style={styles.analizBaslik}>Bugün neye odaklanmalısın</Text>
+            </View>
+            <YakindaPill koyu />
+          </View>
 
-      {/* İstatistik kartları */}
-      <View style={styles.istatRow}>
-        <View style={[styles.istatKart, styles.istatKartYari]}>
-          <Ionicons name="help-circle-outline" size={22} color={COLORS.primary} />
-          <Text style={styles.istatSayi}>{profil?.gunlukSoruHedefi ?? 0}</Text>
-          <Text style={styles.istatEtiket}>Günlük soru hedefi</Text>
-        </View>
-        <View style={[styles.istatKart, styles.istatKartYari]}>
-          <Ionicons name="calendar-outline" size={22} color={COLORS.primary} />
-          <Text style={styles.istatSayi}>{profil?.haftaCalismaSayisi ?? 0}</Text>
-          <Text style={styles.istatEtiket}>Haftalık çalışma günü</Text>
-        </View>
-      </View>
+          <View style={styles.analizPanel}>
+            <Text style={styles.analizPanelMetin}>
+              Denemelerini ve çalışma verilerini ekledikçe koçun en zayıf konunu belirleyip
+              sana özel tekrar ve soru önerileri sunacak.
+            </Text>
+          </View>
 
-      {/* Hızlı erişim */}
-      <Text style={styles.bolumBaslik}>Hızlı Erişim</Text>
-      <HizliErisim />
+          <View style={styles.analizAksiyon}>
+            <TouchableOpacity
+              style={styles.analizBirincil}
+              activeOpacity={0.85}
+              onPress={() => router.push('/(tabs)/ai-koc' as any)}
+            >
+              <Ionicons name="chatbubble-ellipses" size={14} color={COLORS.ink} />
+              <Text style={styles.analizBirincilMetin}>AI Koç’a sor</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.analizIkincil}
+              activeOpacity={0.85}
+              onPress={() => router.push('/soru-yukle' as any)}
+            >
+              <Ionicons name="camera-outline" size={14} color="#fff" />
+              <Text style={styles.analizIkincilMetin}>Soru yükle</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Yukselen>
     </ScrollView>
   );
 }
 
-function HizliErisim() {
-  const router = useRouter();
-  const kartlar: { ikon: React.ComponentProps<typeof Ionicons>['name']; etiket: string; renk: string; rota: string }[] = [
-    { ikon: 'timer-outline', etiket: 'Pomodoro', renk: '#7C3AED', rota: '/(tabs)/pomodoro' },
-    { ikon: 'calendar-outline', etiket: 'Takvim', renk: '#EC4899', rota: '/(tabs)/takvim' },
-    { ikon: 'sparkles-outline', etiket: 'AI Koç', renk: '#10B981', rota: '/(tabs)/ai-koc' },
-  ];
+// ─────────────────────────────────────────────
+// Yardımcı bileşenler
+// ─────────────────────────────────────────────
+
+/** Karta giriş animasyonu — yukarı kayarak belirir (kademeli gecikme). */
+function Yukselen({ gecikme = 0, children }: { gecikme?: number; children: React.ReactNode }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 450,
+      delay: gecikme,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [anim, gecikme]);
   return (
-    <View style={styles.hizliRow}>
-      {kartlar.map((k) => (
-        <TouchableOpacity
-          key={k.etiket}
-          style={styles.hizliKart}
-          onPress={() => router.push(k.rota as any)}
-          activeOpacity={0.75}
-        >
-          <View style={[styles.hizliIkon, { backgroundColor: k.renk + '18' }]}>
-            <Ionicons name={k.ikon} size={22} color={k.renk} />
-          </View>
-          <Text style={styles.hizliEtiket}>{k.etiket}</Text>
-        </TouchableOpacity>
-      ))}
+    <Animated.View
+      style={{
+        marginBottom: 10,
+        opacity: anim,
+        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+/** "Yakında" rozeti — veri kaynağı olmayan kartlar için dürüst boş durum. */
+function YakindaPill({ koyu = false }: { koyu?: boolean }) {
+  return (
+    <View style={[styles.yakindaPill, koyu && styles.yakindaPillKoyu]}>
+      <Ionicons name="time-outline" size={11} color={koyu ? 'rgba(255,255,255,0.85)' : COLORS.textLight} />
+      <Text style={[styles.yakindaPillMetin, koyu && { color: 'rgba(255,255,255,0.85)' }]}>Yakında</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   ekran: { flex: 1, backgroundColor: COLORS.background },
-  icerik: { padding: 20, paddingTop: 56, paddingBottom: 32 },
+  icerik: { paddingHorizontal: 15, paddingTop: 56, paddingBottom: 24 },
   merkezle: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
 
-  baslik: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  tarih: { fontSize: 12, color: COLORS.textLight, marginBottom: 4 },
-  selam: { fontSize: 22, fontWeight: '700', color: COLORS.text },
-  puanBadge: { backgroundColor: COLORS.primaryLight, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  puanMetin: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+  // Başlık
+  baslik: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  tarih: { fontSize: 12.5, color: COLORS.textSecondary, fontWeight: '500' },
+  selam: { fontSize: 23, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, marginTop: 1 },
+  baslikSag: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  puanBadge: { backgroundColor: COLORS.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
+  puanMetin: { fontSize: 11.5, fontWeight: '700', color: COLORS.primary },
+  avatar: { width: 40, height: 40, borderRadius: 99, justifyContent: 'center', alignItems: 'center' },
+  avatarHarf: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
-  kart: { backgroundColor: COLORS.card, borderRadius: 16, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: COLORS.cardBorder },
-  kartBaslik: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  kartBaslikMetin: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-  hedefUniversite: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
-  hedefBolum: { fontSize: 14, color: COLORS.textSecondary },
+  // Sor çubuğu
+  sorCubugu: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.13)',
+    borderRadius: 99,
+    paddingVertical: 6,
+    paddingLeft: 8,
+    paddingRight: 6,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  sorIkon: { width: 30, height: 30, borderRadius: 99, justifyContent: 'center', alignItems: 'center' },
+  sorMetin: { flex: 1, fontSize: 12.5, fontWeight: '500', color: COLORS.textLight },
+  sorMetinVurgu: { color: COLORS.textSecondary },
+  sorGonder: { width: 32, height: 32, borderRadius: 99, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
 
-  istatRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  istatKart: { backgroundColor: COLORS.card, borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.cardBorder },
-  istatKartYari: { flex: 1 },
-  istatSayi: { fontSize: 28, fontWeight: '700', color: COLORS.text, marginTop: 8, marginBottom: 2 },
-  istatEtiket: { fontSize: 12, color: COLORS.textSecondary, textAlign: 'center' },
+  // Kart tabanı
+  kart: {
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    shadowColor: '#1E1B4B',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 18,
+    elevation: 2,
+  },
+  kartUstSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  ikonKutu: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  kartBaslik: { fontSize: 13.5, fontWeight: '700', color: COLORS.text },
+  mikroEtiket: { fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', color: COLORS.textSecondary },
+  kartNot: { fontSize: 11, fontWeight: '500', color: COLORS.textLight, marginTop: 4 },
+  satirSol: { flexDirection: 'row', alignItems: 'center', gap: 7 },
 
-  bolumBaslik: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 12 },
-  hizliRow: { flexDirection: 'row', gap: 12 },
-  hizliKart: { flex: 1, backgroundColor: COLORS.card, borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.cardBorder },
-  hizliIkon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  hizliEtiket: { fontSize: 12, fontWeight: '600', color: COLORS.text },
+  // Hero
+  heroGolge: {
+    borderRadius: 24,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 26,
+    elevation: 8,
+  },
+  hero: { borderRadius: 24, padding: 17, overflow: 'hidden' },
+  heroDaire1: { position: 'absolute', right: -24, top: -28, width: 120, height: 120, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.12)' },
+  heroDaire2: { position: 'absolute', right: 30, bottom: -34, width: 90, height: 90, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.08)' },
+  heroUst: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  heroEtiket: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4, color: 'rgba(255,255,255,0.85)' },
+  heroSayiSatir: { flexDirection: 'row', alignItems: 'flex-end', gap: 7, marginTop: 3 },
+  heroSayi: { fontSize: 46, fontWeight: '800', color: '#fff', lineHeight: 48, letterSpacing: -0.5 },
+  heroGun: { fontSize: 17, fontWeight: '600', color: 'rgba(255,255,255,0.9)', paddingBottom: 6 },
+  heroSinavEtiket: { fontSize: 11.5, color: 'rgba(255,255,255,0.8)' },
+  heroSinavTarih: { fontSize: 14.5, fontWeight: '700', color: '#fff' },
+  heroPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8,
+    backgroundColor: 'rgba(255,255,255,0.18)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99,
+    maxWidth: 170,
+  },
+  heroPillMetin: { fontSize: 11.5, fontWeight: '600', color: '#fff', flexShrink: 1 },
+  heroAlt: { marginTop: 14 },
+  heroAltSatir: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  heroAltMetin: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
+  heroRay: { height: 6, borderRadius: 99, backgroundColor: 'rgba(0,0,0,0.22)', overflow: 'hidden' },
+  heroDolgu: { height: '100%', borderRadius: 99, backgroundColor: '#fff' },
+
+  // İkili satır
+  ikiliRow: { flexDirection: 'row', gap: 10 },
+  seriKart: { flex: 1, backgroundColor: '#FFF9F0', borderColor: '#F6E6CF' },
+  soruKart: { flex: 1 },
+  seriSayi: { fontSize: 30, fontWeight: '800', color: COLORS.text, marginTop: 11 },
+
+  // Günlük soru halkası (boş track)
+  halkaSarici: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
+  halkaTrack: { width: 88, height: 88, borderRadius: 44, borderWidth: 10, borderColor: '#E9E5FB' },
+  halkaMerkez: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  halkaSayi: { fontSize: 26, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
+  halkaAlt: { fontSize: 10.5, fontWeight: '700', color: COLORS.textLight, marginTop: -2 },
+
+  // Hedef netler
+  netBaslikSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  netToplam: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+  netToplamSayi: { fontSize: 12, fontWeight: '800', color: COLORS.text },
+  netGovde: { flexDirection: 'row', gap: 16 },
+  netDers: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6 },
+  netDegerSatir: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  netDeger: { fontSize: 19, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
+  netMax: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight },
+  netRay: { height: 6, borderRadius: 99, backgroundColor: '#EEF1F8', overflow: 'hidden', marginTop: 7 },
+  netDolgu: { height: '100%', borderRadius: 99 },
+  bosSatir: { paddingTop: 2 },
+
+  // Tahmini sıralama
+  siraGovde: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
+  siraDeger: { fontSize: 30, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
+  siraAlt: { fontSize: 12, fontWeight: '600', color: COLORS.textLight },
+
+  // Yakında rozeti
+  yakindaPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: COLORS.background, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 99,
+  },
+  yakindaPillKoyu: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  yakindaPillMetin: { fontSize: 10.5, fontWeight: '700', color: COLORS.textLight },
+
+  // AI Koç · günün analizi (koyu)
+  analizKart: { backgroundColor: COLORS.ink, borderRadius: 20, padding: 16 },
+  analizUst: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  analizIkon: {
+    width: 36, height: 36, borderRadius: 11, justifyContent: 'center', alignItems: 'center',
+    shadowColor: COLORS.accent, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 13, elevation: 4,
+  },
+  analizMikro: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, color: 'rgba(255,255,255,0.5)' },
+  analizBaslik: { fontSize: 13.5, fontWeight: '800', color: '#fff', marginTop: 1 },
+  analizPanel: { marginTop: 13, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 13, padding: 12 },
+  analizPanelMetin: { fontSize: 11.5, fontWeight: '500', color: 'rgba(255,255,255,0.65)', lineHeight: 17 },
+  analizAksiyon: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  analizBirincil: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#fff', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 12,
+  },
+  analizBirincilMetin: { fontSize: 12.5, fontWeight: '800', color: COLORS.ink },
+  analizIkincil: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14,
+  },
+  analizIkincilMetin: { fontSize: 12.5, fontWeight: '700', color: '#fff' },
 });

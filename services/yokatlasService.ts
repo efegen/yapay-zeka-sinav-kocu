@@ -99,14 +99,54 @@ export interface HedefNetBilgisi {
  *
  * Toplam net, soru sayısı oranlarına göre derslere dağıtılır.
  */
+/** Geçerli (pozitif sayı) taban puanı döndürür; "Dolmadı"/boş/0 → null. */
+const gecerliPuan = (v: string | null | undefined): number | null => {
+  if (v == null) return null;
+  const n = parseFloat(v);
+  return isNaN(n) || n <= 0 ? null : n;
+};
+
+/**
+ * Bir program için kullanılabilir taban puanı çözer:
+ *   1) programın kendi 2025'i  → 2) kendi 2024'ü →
+ *   3) aynı üniversite+bölüm+puan türündeki (kontenjanı dolmuş) kardeş programın 2025'i → 4) 2024'ü.
+ * Hiçbiri yoksa null. "Dolmadı" gibi geçersiz değerler atlanır.
+ */
+const tabanPuanCoz = (
+  program: YokatlasProgram
+): { tabanPuan: number; kaynakYil: number } | null => {
+  const oz25 = gecerliPuan(program.tabanPuan_2025);
+  if (oz25) return { tabanPuan: oz25, kaynakYil: 2025 };
+  const oz24 = gecerliPuan(program.tabanPuan_2024);
+  if (oz24) return { tabanPuan: oz24, kaynakYil: 2024 };
+
+  const kardesler = programlar.filter(
+    (k) =>
+      k.programId !== program.programId &&
+      k.universiteAdi === program.universiteAdi &&
+      k.bolumAdi === program.bolumAdi &&
+      k.puanTuru === program.puanTuru
+  );
+  for (const k of kardesler) {
+    const v = gecerliPuan(k.tabanPuan_2025);
+    if (v) return { tabanPuan: v, kaynakYil: 2025 };
+  }
+  for (const k of kardesler) {
+    const v = gecerliPuan(k.tabanPuan_2024);
+    if (v) return { tabanPuan: v, kaynakYil: 2024 };
+  }
+  return null;
+};
+
 export const hedefNetHesapla = (
   programId: string,
 ): HedefNetBilgisi | null => {
   const program = programBul(programId);
   if (!program) return null;
 
-  const tabanPuan = parseFloat(program.tabanPuan_2025 ?? '');
-  if (isNaN(tabanPuan) || tabanPuan <= 0) return null;
+  const cozulen = tabanPuanCoz(program);
+  if (!cozulen) return null;
+  const { tabanPuan, kaynakYil } = cozulen;
 
   const puanTuru = program.puanTuru;
   const OBP = 400; // 80 diploma notu varsayımı
@@ -167,7 +207,7 @@ export const hedefNetHesapla = (
     tyt_matematik,
     tyt_fen,
     tyt_sosyal,
-    kaynak_yil: 2025,
+    kaynak_yil: kaynakYil,
   };
 
   // AYT netleri puan türüne göre dağıt

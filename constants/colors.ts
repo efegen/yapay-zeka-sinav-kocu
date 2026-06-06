@@ -12,6 +12,8 @@ export const COLORS = {
   textLight: '#94A3B8',
   success: '#10B981',
   error: '#EF4444',
+  amber: '#F59E0B',
+  ink: '#15122E',
   white: '#FFFFFF',
   selectedBorder: '#7C3AED',
   selectedBackground: '#F5F3FF',
