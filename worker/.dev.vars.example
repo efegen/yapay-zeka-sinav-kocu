@@ -1,0 +1,13 @@
+# Worker yerel env örneği — kopyala: cp .dev.vars.example .dev.vars
+# .dev.vars gitignore'dadır; yalnızca `wrangler dev` (yerel) sırasında okunur ve
+# wrangler.toml [vars] değerlerini override eder. Production'da wrangler.toml geçerlidir.
+
+# Model seçimi (production varsayılanları wrangler.toml [vars] içinde):
+CHAT_MODEL=gpt-5-mini
+VISION_MODEL_TRIAGE=gpt-4.1-mini
+VISION_MODEL_KOLAY=gpt-4.1
+VISION_MODEL_ORTA=gpt-5-mini
+VISION_MODEL_ZOR=gpt-5
+
+# OpenAI anahtarı yerelde de gerekir (production'da `wrangler secret put OPENAI_API_KEY`):
+# OPENAI_API_KEY=sk-...

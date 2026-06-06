@@ -9,7 +9,22 @@
 
 export interface Env {
   OPENAI_API_KEY: string;
+  /** Sohbet (kart JSON) modeli — wrangler.toml [vars] / .dev.vars'tan gelir. */
+  CHAT_MODEL?: string;
+  /** Soru fotoğrafı: zorluk/okunabilirlik triyaj modeli (ucuz, hızlı). */
+  VISION_MODEL_TRIAGE?: string;
+  /** Soru fotoğrafı çözücüleri — zorluğa göre seçilir. */
+  VISION_MODEL_KOLAY?: string;
+  VISION_MODEL_ORTA?: string;
+  VISION_MODEL_ZOR?: string;
 }
+
+// Env tanımlı değilse kullanılacak makul varsayılanlar.
+const VARSAYILAN_CHAT_MODEL = 'gpt-5-mini';
+const VARSAYILAN_TRIAGE = 'gpt-4.1-mini';
+const VARSAYILAN_KOLAY = 'gpt-4.1';
+const VARSAYILAN_ORTA = 'gpt-5-mini';
+const VARSAYILAN_ZOR = 'gpt-5';
 
 interface OgrenciBaglam {
   isim?: string;
@@ -21,6 +36,7 @@ interface OgrenciBaglam {
   hedefSiralama?: number;
   hedefNetler?: Record<string, number>;
   gunlukSoruHedefi?: number;
+  zorlananKonular?: string[]; // koç hafızasından (öğrencinin zorlandığı konular)
 }
 
 interface SohbetMesaji {
@@ -39,6 +55,33 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json', ...CORS },
   });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// KART PROTOKOLÜ (bkz. design_handoff_ai_koc/KART_PROTOKOLU.md)
+// Model { yanit, kartlar:[{tip,veri}] } üretir. UI tipli kartları çizer.
+// ════════════════════════════════════════════════════════════════════
+const GECERLI_TIPLER = new Set([
+  'gunlukBrifing', 'baglamSeridi', 'niyetIzgarasi', 'pomodoroPlani', 'konuAdimlari',
+  'miniDenemeAnalizi', 'cozumAdimlari', 'ipucu', 'momentum', 'molaRecetesi',
+  'denemeKiyasi', 'enBuyukKazanc', 'haftalikPlan', 'formulKarti',
+  'oturumZamanPlani', 'sinavCantasi', 'hedefOzeti', 'projeksiyon',
+]);
+
+/** Modelin ürettiği kartları doğrular: bilinmeyen tipi/eksik veriyi düşürür, max 2 kart. */
+function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unknown> }[] {
+  if (!Array.isArray(ham)) return [];
+  const temiz: { tip: string; veri: Record<string, unknown> }[] = [];
+  for (const k of ham) {
+    if (!k || typeof k !== 'object') continue;
+    const tip = (k as any).tip;
+    const veri = (k as any).veri;
+    if (typeof tip !== 'string' || !GECERLI_TIPLER.has(tip)) continue;
+    if (!veri || typeof veri !== 'object' || Array.isArray(veri)) continue;
+    temiz.push({ tip, veri });
+    if (temiz.length >= 2) break; // yanıt başına en fazla 2 kart
+  }
+  return temiz;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -64,6 +107,9 @@ function sistemPromptu(b: OgrenciBaglam): string {
       .join(', ');
     satirlar.push(`- Hedef netler: ${ozet}`);
   }
+  if (b.zorlananKonular && b.zorlananKonular.length) {
+    satirlar.push(`- Zorlandığı konular (hafıza): ${b.zorlananKonular.join(', ')}`);
+  }
   const baglam = satirlar.length ? satirlar.join('\n') : '- (Profil bilgisi henüz yok.)';
 
   return [
@@ -76,15 +122,329 @@ function sistemPromptu(b: OgrenciBaglam): string {
     '',
     'Kurallar:',
     '- Türkçe, sıcak, samimi ve motive edici bir dille konuş. Öğrenciye ismiyle hitap edebilirsin.',
-    '- Yanıtların kısa ve net olsun (mobil ekran). Gerektiğinde madde madde yaz.',
     '- Somut ol: "çok çalış" deme; hangi konu, kaç soru, kaç dakika Pomodoro gibi uygulanabilir öneriler ver.',
     '- ELİNDE OLMAYAN veriyi UYDURMA. Üniversite taban puanı/sıralaması veya öğrencinin geçmiş deneme',
     '  sonuçları gibi sana verilmemiş bilgileri varmış gibi söyleme; gerekirse öğrenciden bilgi iste.',
     '- Ciddi psikolojik/sağlık durumlarında profesyonel destek almasını da öner.',
     '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
+    '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
+    '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
+    '',
+    KART_REHBERI,
   ].join('\n');
 }
+
+// ── Yapılandırılmış çıktı yönergesi (MASTER_PROMPT_REVIZYON.md §3) ──
+const KART_REHBERI = [
+  'ÇIKTI FORMATI:',
+  '- Her yanıtı GEÇERLİ JSON olarak ver: { "yanit": "...", "kartlar": [ { "tip": "...", "veri": {...} } ] }',
+  '- "yanit" her zaman dolu olsun: kartı tanıtan, sıcak, kısa bir cümle. Kartın içeriğini metinde TEKRARLAMA.',
+  '- Vurgu için metin alanlarında **kalın** (markdown) kullanabilirsin. Tek yıldız (*) kullanma.',
+  '- Uygun olduğunda kart üret; genel/duygusal/belirsiz sohbette kart üretme, "kartlar": [] bırak.',
+  '- Bir yanıtta en fazla 2 kart. Kart yığma; en değerli olanı seç.',
+  '',
+  'HAFIZA (opsiyonel, ÇOK TEMKİNLİ):',
+  '- SADECE öğrenci bir konuda AÇIKÇA zorlandığını ("X\'i anlamıyorum/zor geliyor") ya da artık anladığını',
+  '  belirtirse yanıta "hafiza" ekle: "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }',
+  '- Belirsizse, tek seferlik soru çözmede veya sıradan sohbette "hafiza" KOYMA. Şüphedeysen koyma.',
+  '',
+  'KART SEÇİMİ (kullanıcı niyeti → kart tipi):',
+  '- Plan/program: "pomodoroPlani" (tek oturum) veya "haftalikPlan" (hafta).',
+  '- Konu çalışma yolu: "konuAdimlari" (+ gerekiyorsa "ipucu").',
+  '- Çözülecek soru (foto/metin): "cozumAdimlari" (+ "ipucu").',
+  '- Formül/özet: "formulKarti".',
+  '- Deneme sonucu paylaşılınca: "denemeKiyasi" + "enBuyukKazanc".',
+  '- Moral/motivasyon: "momentum" + "molaRecetesi".',
+  '- Sınav günü/strateji: "oturumZamanPlani" + "sinavCantasi".',
+  '- Hedefe uzaklık/"yetişir mi": "hedefOzeti" + "projeksiyon".',
+  '',
+  'VERİ DÜRÜSTLÜĞÜ (en kritik kural):',
+  '- "momentum", "denemeKiyasi", "hedefOzeti", "projeksiyon", "baglamSeridi", "miniDenemeAnalizi" kartları',
+  '  GEÇMİŞ VERİ ister. Bu veri sana bağlamda VERİLDİYSE kullan; VERİLMEDİYSE bu kartları UYDURMA —',
+  '  bunun yerine "yanit" içinde öğrenciden veriyi iste (örn. son deneme netlerini yaz).',
+  '- Net, sıra, süre gibi sayıları asla tahmin edip kart alanına yazma. Yalnızca bağlamdaki değerleri kullan.',
+  '',
+  'KART ŞEMALARI (veri alanları — tam olarak bu adları kullan):',
+  '- pomodoroPlani: { baslik, ozet, bloklar:[{sure,ders,tip:"odak"|"mola",renk?}], cta?:{etiket,aksiyon:"pomodoro"} }',
+  '- konuAdimlari: { konu, adimlar:[metin], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] }',
+  '- miniDenemeAnalizi: { baslik, dersler:[{ad,net,max,renk}], icgoru }',
+  '- cozumAdimlari: { soru, adimlar:[{ad,detay}], sonuc, acikAdim? }',
+  '- ipucu: { baslik, metin }',
+  '- momentum: { baslik, altBaslik?, metrikler:[{deger,etiket,icon,renk}], not? }',
+  '- molaRecetesi: { baslik, altBaslik?, ogeler:[{icon,metin}], cta?:{etiket,aksiyon:"pomodoro"} }',
+  '- denemeKiyasi: { baslik, altBaslik?, dersler:[{ad,net,max,onceki,renk}], toplamNet:{deger,fark}, tahminiSira?:{deger,yon:"yukari"|"asagi"|"sabit"} }',
+  '- enBuyukKazanc: { ders, yuzde(0-100), renk, metin, cta?:{etiket,aksiyon:"plan"} }',
+  '- haftalikPlan: { baslik, ozet, tarihAraligi?, gunler:[{gun,odak,sure,renk,bugun?,isler:[metin]}], cta?:{etiket,aksiyon:"takvim"} }',
+  '- formulKarti: { ders, konu, formuller:[{sol,sag,not?}], altinKural?, kaydedilebilir? }',
+  '- oturumZamanPlani: { baslik, altBaslik?, dagilim:[{ad,dk,renk}], altinKural? }',
+  '- sinavCantasi: { baslik, altBaslik?, maddeler:[metin], tamamlanan?:[index] }',
+  '- hedefOzeti: { hedef, yuzde(0-100), hedefSira?, guncelSira?, netler:[{ad,simdi,hedef,renk}], not? }',
+  '- projeksiyon: { baslik, altBaslik?, barlar:[{etiket,deger,yukseklik(0-100),tip:"notr"|"ara"|"hedef"}], sonuc:{durum:"yetisir"|"riskli"|"yetismez",metin} }',
+  '',
+  'RENKLER: yalnızca #7C3AED (mor), #EC4899 (pembe), #10B981 (yeşil), #F59E0B (turuncu), #94A3B8 (nötr).',
+  'ICON adları: timer, book, trendUp, calendar, clock, shield, target, moon, bolt, flame, pencil.',
+  'MATEMATİK: cozumAdimlari ("detay","sonuc") ve formulKarti içindeki matematik ifadelerini LaTeX ile yaz',
+  '($...$ satır içi, $$...$$ blok; kesir \\frac{pay}{payda}, üs x^2, kök \\sqrt{}). Düz "a/b" yazma.',
+].join('\n');
 // ════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
+// SORU ÇÖZ — görsel (vision) sistem promptu
+// ════════════════════════════════════════════════════════════════════
+const SORU_PROMPT = [
+  'Sen YZDSK uygulamasının YKS (TYT/AYT) soru çözüm asistanısın. Sana bir soru FOTOĞRAFI verilir.',
+  'Görseldeki soruyu OKU, Türkçe ve adım adım çöz. Çıktıyı YALNIZCA geçerli JSON olarak ver:',
+  '',
+  '{',
+  '  "durum": "cozuldu" | "bulanik" | "alakasiz",',
+  '  "yanit": "kısa, sıcak bir giriş cümlesi (çözümü tekrarlama)",',
+  '  "ders": "AYT Matematik" gibi,',
+  '  "konu": "Limit" gibi,',
+  '  "kartlar": [',
+  '    { "tip": "cozumAdimlari", "veri": { "soru": "okunur soru ifadesi", "adimlar": [{ "ad": "Adım başlığı", "detay": "açıklama/işlem" }], "sonuc": "kısa nihai cevap", "acikAdim": 0 } },',
+  '    { "tip": "ipucu", "veri": { "baslik": "Ezber ipucu", "metin": "kısa püf nokta" } }',
+  '  ]',
+  '}',
+  '',
+  'KURALLAR:',
+  '- Görseldeki soruyu net OKUYAMIYORSAN (bulanık, karanlık, kesik): durum="bulanik", kartlar=[], yanit kısa açıklama.',
+  '- Görselde bir SORU YOKSA (alakasız fotoğraf): durum="alakasiz", kartlar=[], yanit kısa açıklama.',
+  '- Soru okunuyorsa: durum="cozuldu". Adım sayısını soruya göre AYARLA — basit soruda 1-2 kısa adım yeter,',
+  '  her şeyi gereksiz yere bölme; yalnızca çok adımlı/zor soruda 3-5 adım kullan. "sonuc" net olsun,',
+  '  şıklı soruda doğru şıkkı yaz.',
+  '- "adimlar[].ad" KISA, düz Türkçe başlık olsun (LaTeX/$ KOYMA). Matematik yalnızca "detay" ve "sonuc"ta.',
+  '- Metinde GERÇEK satır sonu kullan; "\\n" gibi kaçış dizilerini düz metin olarak YAZMA.',
+  '- Çözmeden önce verilenleri dikkatle oku; işlemleri ve nihai sonucu bir kez KONTROL ET. Acele etme.',
+  '- UYDURMA: göremediğin değeri tahmin etme. Emin değilsen durum="bulanik".',
+  '',
+  'MATEMATİK BİÇİMİ (çok önemli — öğrenci için okunaklı olmalı):',
+  '- Tüm matematiksel ifadeleri LaTeX ile yaz. Satır içi: $...$, ayrı satır/blok: $$...$$.',
+  '- Kesirleri \\frac{pay}{payda} ile yaz: düz "a/b" YAZMA. Örn: $$\\frac{x^2+y^3}{x-y}$$.',
+  '- Üs $x^2$, kök $\\sqrt{x}$, türev $\\frac{d}{dx}x^2 = 2x$, limit $\\lim_{x\\to 2}$, integral $\\int$.',
+  '- "soru", "adimlar[].detay", "ipucu.metin" ve "sonuc" alanlarında bu kurala uy. Açıklama metnini ($ dışında) Türkçe düz yaz.',
+  '- HER LaTeX komutu (\\frac, \\sqrt, ^, _, \\pi ...) MUTLAKA $...$ içinde olsun; ASLA $ dışında çıplak bırakma.',
+  '- ŞIKLARI da sar: her şıktaki matematik ayrı ayrı $...$ içinde. Örn: (A) $1$ (B) $2$ (C) $3$ (D) $\\frac{1}{3}$ (E) $\\frac{2}{3}$.',
+  '- Örnek detay: "Değerleri yerine koyalım: $$\\frac{2^2+(-1)^3}{2-(-1)} = \\frac{4-1}{3} = 1$$".',
+  '- Çok uzun eşitlik zincirini TEK satıra sıkıştırma (taşar). Uzunsa parçala: ayrı $$...$$ satırları',
+  '  ya da \\begin{aligned} a &= b \\\\ &= c \\end{aligned} kullan (her adım yeni satır).',
+  '- Vurgu için metin içinde **kalın** (markdown) kullanabilirsin. Matematiği $ içine, vurguyu ** içine koy.',
+  '',
+  'GEOMETRİ / ŞEKİL (fark yaratan kısım):',
+  '- Soru geometri/şekil içeriyorsa (üçgen, çember, açı, dik üçgen, koordinat düzlemi ...)',
+  '  "cozumAdimlari.veri.sekil" alanına bir SVG diyagram koy. Gerekirse bir adımın "adimlar[].sekil"ine',
+  '  ek küçük şekil ekleyebilirsin (adım adım inşa).',
+  '- SVG kuralları: kök <svg viewBox="0 0 300 200"> (oranı içeriğe göre ayarla, yükseklik 160-220).',
+  '  SADECE <line>, <polygon>, <circle>, <path>, <text>, <rect> kullan. <script>/<image>/<foreignObject> KULLANMA.',
+  '- Renkler: ana çizgi stroke="#1E1B4B", vurgulanan kenar/açı stroke="#7C3AED", verilen değer etiketi fill="#EC4899".',
+  '  Dolgu genelde fill="none", stroke-width="2". Köşe/uzunluk/açıları <text font-size="13"> ile etiketle.',
+  '- Şekil temiz, okunaklı ve doğru ölçekli olsun (defter çizimi gibi). Şekil gerekmiyorsa "sekil" KOYMA.',
+  '- En fazla 2 kart. İpucu opsiyonel.',
+].join('\n');
+
+// Triyaj: soruyu ÇÖZMEDEN sınıflandır (hangi modele yönlendireceğimizi belirler).
+const TRIAGE_PROMPT = [
+  'Sana bir soru FOTOĞRAFI verilir. SORUYU ÇÖZME. Sadece sınıflandır ve YALNIZCA şu JSON\'u döndür:',
+  '{ "soruVar": true/false, "okunabilir": true/false, "zorluk": "kolay"|"orta"|"zor", "konu": "Ders · Konu" }',
+  '- soruVar: görselde gerçek bir akademik soru var mı.',
+  '- okunabilir: soru metni net okunuyor mu (bulanık/karanlık/kesik değilse true).',
+  '- zorluk ölçütü: tek işlem/tek adım → "kolay"; 2-3 kavram/adım → "orta";',
+  '  çok adımlı, bileşik fonksiyon, türev/integral zinciri, ispat, karmaşık geometri → "zor".',
+  '- konu: kısa tahmin (örn. "AYT Matematik · Limit"). Emin değilsen boş bırak.',
+  'Kısa ve hızlı ol; çözüm/aciklama üretme.',
+].join('\n');
+
+async function handleChat(request: Request, env: Env): Promise<Response> {
+  let govde: { ogrenciBaglam?: OgrenciBaglam; mesajlar?: SohbetMesaji[] };
+  try {
+    govde = (await request.json()) as typeof govde;
+  } catch {
+    return json({ hata: 'Geçersiz JSON.' }, 400);
+  }
+
+  const mesajlar = Array.isArray(govde.mesajlar) ? govde.mesajlar : [];
+  if (!mesajlar.length) {
+    return json({ hata: 'Mesaj yok.' }, 400);
+  }
+
+  // Son 12 mesaj + mesaj başına 2000 karakter sınırı (token tasarrufu).
+  const oaMesajlar = [
+    { role: 'system', content: sistemPromptu(govde.ogrenciBaglam ?? {}) },
+    ...mesajlar.slice(-12).map((m) => ({
+      role: m.rol === 'asistan' ? 'assistant' : 'user',
+      content: String(m.metin ?? '').slice(0, 2000),
+    })),
+  ];
+
+  // Model env'den gelir (wrangler.toml [vars] / .dev.vars). Kod değişmeden değiştirilebilir.
+  const model = env.CHAT_MODEL || VARSAYILAN_CHAT_MODEL;
+
+  const oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 900 });
+  if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
+
+  const cikti = jsonAyristir(oa.ham!);
+  const yanitMetni =
+    typeof cikti.yanit === 'string' && cikti.yanit.trim() ? cikti.yanit.trim() : oa.ham!;
+  return json({
+    yanit: yanitMetni,
+    kartlar: temizleKartlar(cikti.kartlar),
+    hafiza: temizleHafiza(cikti.hafiza),
+  });
+}
+
+/** Görsel içeren OpenAI kullanıcı mesajı oluşturur. */
+function gorselMesaji(dataUrl: string, metin: string) {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: metin },
+      { type: 'image_url', image_url: { url: dataUrl } },
+    ],
+  };
+}
+
+/** Zorluğa göre çözücü model + token tavanı (env'den, varsayılanlarla). */
+function cozucuSec(env: Env, zorluk?: string): { model: string; tavan: number } {
+  if (zorluk === 'zor') return { model: env.VISION_MODEL_ZOR || VARSAYILAN_ZOR, tavan: 6000 };
+  if (zorluk === 'kolay') return { model: env.VISION_MODEL_KOLAY || VARSAYILAN_KOLAY, tavan: 2500 };
+  return { model: env.VISION_MODEL_ORTA || VARSAYILAN_ORTA, tavan: 4000 }; // orta / bilinmiyor
+}
+
+/**
+ * Triyaj: ucuz/hızlı modelle soruyu ÇÖZMEDEN sınıflandırır (okunabilirlik + zorluk).
+ * Bulanık/soru-yok ise pahalı çözüme hiç gitmeden döner.
+ */
+async function triajla(
+  env: Env,
+  dataUrl: string
+): Promise<{ zorluk?: string; konu?: string; durum?: 'bulanik' | 'alakasiz'; yanit?: string }> {
+  const model = env.VISION_MODEL_TRIAGE || VARSAYILAN_TRIAGE;
+  const oa = await openAiTamamla(env, {
+    model,
+    messages: [{ role: 'system', content: TRIAGE_PROMPT }, gorselMesaji(dataUrl, 'Bu soruyu sınıflandır (ÇÖZME).')],
+    max_completion_tokens: 400,
+  });
+  if (oa.hata) return {}; // triyaj başarısız → orta seviye varsayımıyla devam et
+  const c = jsonAyristir(oa.ham!);
+  if (c.soruVar === false) {
+    return { durum: 'alakasiz', yanit: 'Bu fotoğrafta bir soru göremedim. Soruyu net çeker misin?' };
+  }
+  if (c.okunabilir === false) {
+    return { durum: 'bulanik', yanit: 'Fotoğraf net değil — daha aydınlık ve yakından tekrar çeker misin?' };
+  }
+  const zorluk = c.zorluk === 'kolay' || c.zorluk === 'zor' ? c.zorluk : 'orta';
+  return { zorluk, konu: typeof c.konu === 'string' ? c.konu : '' };
+}
+
+async function handleSoru(request: Request, env: Env): Promise<Response> {
+  let govde: { gorsel?: string; ogrenciBaglam?: OgrenciBaglam; not?: string };
+  try {
+    govde = (await request.json()) as typeof govde;
+  } catch {
+    return json({ hata: 'Geçersiz JSON.' }, 400);
+  }
+
+  const gorsel = typeof govde.gorsel === 'string' ? govde.gorsel.trim() : '';
+  if (!gorsel) return json({ hata: 'Görsel yok.' }, 400);
+  const not = typeof govde.not === 'string' ? govde.not.trim().slice(0, 300) : '';
+
+  // Base64 verilmişse data URL'e çevir (varsayılan jpeg).
+  const dataUrl = gorsel.startsWith('data:') ? gorsel : `data:image/jpeg;base64,${gorsel}`;
+
+  // 1) Triyaj — okunabilirlik + zorluk. Bulanık/soru-yok ise pahalı modele gitme.
+  const triaj = await triajla(env, dataUrl);
+  if (triaj.durum) {
+    return json({ durum: triaj.durum, yanit: triaj.yanit ?? '', ders: '', konu: '', kartlar: [] });
+  }
+
+  // 2) Zorluğa göre çözücü seç (kolay→gpt-4.1, orta→gpt-5-mini, zor→gpt-5).
+  const { model, tavan } = cozucuSec(env, triaj.zorluk);
+  const istek = not
+    ? `Bu fotoğraftaki YKS sorusunu çöz. Öğrencinin notu/isteği: "${not}" — buna da dikkat et.`
+    : 'Bu fotoğraftaki YKS sorusunu çöz.';
+  const oa = await openAiTamamla(env, {
+    model,
+    messages: [{ role: 'system', content: SORU_PROMPT }, gorselMesaji(dataUrl, istek)],
+    max_completion_tokens: tavan,
+  });
+  if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
+
+  const cikti = jsonAyristir(oa.ham!);
+  const durum =
+    cikti.durum === 'bulanik' || cikti.durum === 'alakasiz' ? cikti.durum : 'cozuldu';
+  return json({
+    durum,
+    yanit: typeof cikti.yanit === 'string' ? cikti.yanit : '',
+    ders: typeof cikti.ders === 'string' ? cikti.ders : triaj.konu?.split(' ')[0] ?? '',
+    konu: typeof cikti.konu === 'string' ? cikti.konu : triaj.konu ?? '',
+    kartlar: durum === 'cozuldu' ? temizleKartlar(cikti.kartlar) : [],
+  });
+}
+
+/** OpenAI chat/completions çağrısı (JSON çıktı). Ortak hata yönetimi. */
+async function openAiTamamla(
+  env: Env,
+  payload: { model: string; messages: unknown[]; max_completion_tokens: number }
+): Promise<{ ham?: string; hata?: string; detay?: string }> {
+  let oaYanit: Response;
+  try {
+    oaYanit = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        ...payload,
+        // Yeni model uyumu: max_tokens yerine max_completion_tokens; temperature gönderilmez.
+        response_format: { type: 'json_object' },
+      }),
+    });
+  } catch {
+    return { hata: 'AI servisine ulaşılamadı.' };
+  }
+
+  if (!oaYanit.ok) {
+    const detay = await oaYanit.text();
+    return { hata: 'AI servisi hata döndürdü.', detay: detay.slice(0, 300) };
+  }
+
+  const veri = (await oaYanit.json()) as {
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
+  };
+  const secim = veri.choices?.[0];
+  const ham = secim?.message?.content?.trim();
+  if (!ham) {
+    // Reasoning modelinde içerik boşsa genelde token sınırına takılmıştır (finish_reason='length').
+    return {
+      hata:
+        secim?.finish_reason === 'length'
+          ? 'Çözüm fazla uzun geldi (token sınırı). Soruyu daha net/yakın çekip tekrar dener misin?'
+          : 'AI boş yanıt verdi.',
+    };
+  }
+  return { ham };
+}
+
+/** Model'in opsiyonel hafıza işaretini doğrular (geçersizse undefined). */
+function temizleHafiza(h: unknown): { konu: string; ders?: string; sinyal: string } | undefined {
+  if (!h || typeof h !== 'object') return undefined;
+  const konu = (h as any).konu;
+  const sinyal = (h as any).sinyal;
+  if (typeof konu !== 'string' || !konu.trim()) return undefined;
+  if (sinyal !== 'zorlaniyor' && sinyal !== 'anladi') return undefined;
+  const ders = typeof (h as any).ders === 'string' ? (h as any).ders : undefined;
+  return { konu: konu.trim().slice(0, 60), ders, sinyal };
+}
+
+/** Güvenli JSON ayrıştırma; bozuksa boş nesne döner. */
+function jsonAyristir(ham: string): Record<string, unknown> {
+  try {
+    const o = JSON.parse(ham);
+    return o && typeof o === 'object' ? o : {};
+  } catch {
+    return {};
+  }
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -93,66 +453,15 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (request.method !== 'POST' || url.pathname !== '/chat') {
+    if (request.method !== 'POST') {
       return json({ hata: 'Geçersiz istek.' }, 404);
     }
     if (!env.OPENAI_API_KEY) {
       return json({ hata: 'Sunucu yapılandırması eksik (OPENAI_API_KEY).' }, 500);
     }
 
-    let govde: { ogrenciBaglam?: OgrenciBaglam; mesajlar?: SohbetMesaji[] };
-    try {
-      govde = (await request.json()) as typeof govde;
-    } catch {
-      return json({ hata: 'Geçersiz JSON.' }, 400);
-    }
-
-    const mesajlar = Array.isArray(govde.mesajlar) ? govde.mesajlar : [];
-    if (!mesajlar.length) {
-      return json({ hata: 'Mesaj yok.' }, 400);
-    }
-
-    // Son 12 mesaj + mesaj başına 2000 karakter sınırı (token tasarrufu).
-    const oaMesajlar = [
-      { role: 'system', content: sistemPromptu(govde.ogrenciBaglam ?? {}) },
-      ...mesajlar.slice(-12).map((m) => ({
-        role: m.rol === 'asistan' ? 'assistant' : 'user',
-        content: String(m.metin ?? '').slice(0, 2000),
-      })),
-    ];
-
-    let oaYanit: Response;
-    try {
-      oaYanit = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: oaMesajlar,
-          max_tokens: 700,
-          temperature: 0.6,
-        }),
-      });
-    } catch {
-      return json({ hata: 'AI servisine ulaşılamadı.' }, 502);
-    }
-
-    if (!oaYanit.ok) {
-      const detay = await oaYanit.text();
-      return json({ hata: 'AI servisi hata döndürdü.', detay: detay.slice(0, 300) }, 502);
-    }
-
-    const veri = (await oaYanit.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const yanit = veri.choices?.[0]?.message?.content?.trim();
-    if (!yanit) {
-      return json({ hata: 'AI boş yanıt verdi.' }, 502);
-    }
-
-    return json({ yanit });
+    if (url.pathname === '/chat') return handleChat(request, env);
+    if (url.pathname === '/soru') return handleSoru(request, env);
+    return json({ hata: 'Geçersiz istek.' }, 404);
   },
 };

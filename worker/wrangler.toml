@@ -5,3 +5,15 @@ compatibility_date = "2025-01-01"
 # OPENAI_API_KEY bir SECRET'tır, buraya YAZILMAZ.
 # Deploy'dan önce şu komutla bir kez girilir:
 #   npx wrangler secret put OPENAI_API_KEY
+
+# ── Model seçimi (env) ──────────────────────────────────────────────
+# Modeli değiştirmek için yalnızca burayı düzenleyip `npx wrangler deploy` yap.
+# Yerelde (`wrangler dev`) override etmek istersen worker/.dev.vars kullan.
+[vars]
+# AI Koç sohbeti (kart JSON üretimi)
+CHAT_MODEL = "gpt-5-mini"
+# Soru fotoğrafı çözümü — önce ucuz bir model zorluğu sınıflandırır, sonra ona göre çözücü seçilir:
+VISION_MODEL_TRIAGE = "gpt-4.1-mini"   # zorluk/okunabilirlik triyajı (ucuz, hızlı)
+VISION_MODEL_KOLAY  = "gpt-4.1"        # basit sorular (hızlı)
+VISION_MODEL_ORTA   = "gpt-5-mini"     # orta sorular (denge)
+VISION_MODEL_ZOR    = "gpt-5"          # zor sorular (en doğru)
