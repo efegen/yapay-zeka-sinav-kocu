@@ -15,19 +15,19 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../constants/colors';
+import { useProfile } from '../hooks/useProfile';
+import { baglamKur, soruyuCoz, AiHatasi, type SoruYaniti } from '../services/aiService';
+import type { Kart } from '../types/koc';
+import { KartRenderer } from '../components/koc/KartRenderer';
 
 type Adim = 'bos' | 'yukleniyor' | 'basarili' | 'bulanik' | 'alakasiz';
 
-const SAHTE_SONUC: Adim[] = ['basarili', 'bulanik', 'alakasiz'];
-
-function rastgeleSonuc(): Adim {
-  return SAHTE_SONUC[Math.floor(Math.random() * SAHTE_SONUC.length)];
-}
-
 export default function SoruYukle() {
   const router = useRouter();
+  const { profil } = useProfile();
   const [adim, setAdim] = useState<Adim>('bos');
   const [gorselUri, setGorselUri] = useState<string | null>(null);
+  const [sonuc, setSonuc] = useState<SoruYaniti | null>(null);
   const [snackbarMesaj, setSnackbarMesaj] = useState('');
 
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -94,24 +94,43 @@ export default function SoruYukle() {
       return;
     }
 
-    const sonuc = kaynak === 'kamera'
-      ? await ImagePicker.launchCameraAsync({ quality: 0.8, allowsEditing: true })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+    const secim = kaynak === 'kamera'
+      ? await ImagePicker.launchCameraAsync({ quality: 0.6, base64: true, allowsEditing: true })
+      : await ImagePicker.launchImageLibraryAsync({ quality: 0.6, base64: true, allowsEditing: true, mediaTypes: ImagePicker.MediaTypeOptions.Images });
 
-    if (sonuc.canceled) return;
+    if (secim.canceled) return;
 
-    const uri = sonuc.assets[0].uri;
-    setGorselUri(uri);
+    const asset = secim.assets[0];
+    setGorselUri(asset.uri);
+    setSonuc(null);
     setAdim('yukleniyor');
 
-    setTimeout(() => {
-      sonucGoster(rastgeleSonuc());
-    }, 4000);
+    if (!asset.base64) {
+      sonucGoster('bulanik');
+      return;
+    }
+
+    try {
+      const cevap = await soruyuCoz(asset.base64, baglamKur(profil));
+      setSonuc(cevap);
+      if (cevap.durum === 'cozuldu' && cevap.kartlar.length) sonucGoster('basarili');
+      else if (cevap.durum === 'alakasiz') sonucGoster('alakasiz');
+      else sonucGoster('bulanik');
+    } catch (e) {
+      const mesaj = e instanceof AiHatasi ? e.message : 'Soru çözülürken bir hata oluştu.';
+      setAdim('bulanik');
+      snackbarGoster(mesaj);
+    }
+  }
+
+  function kartGuncelle(i: number, yeni: Kart) {
+    setSonuc((s) => (s ? { ...s, kartlar: s.kartlar.map((k, j) => (j === i ? yeni : k)) } : s));
   }
 
   function sifirla() {
     setAdim('bos');
     setGorselUri(null);
+    setSonuc(null);
     sonucAnim.setValue(0);
   }
 
@@ -165,30 +184,31 @@ export default function SoruYukle() {
         )}
 
         {/* Başarılı sonuç */}
-        {adim === 'basarili' && (
-          <Animated.View style={[styles.sonucKart, { opacity: sonucAnim, transform: [{ translateY: sonucAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
+        {adim === 'basarili' && sonuc && (
+          <Animated.View style={[styles.sonucAlani, { opacity: sonucAnim, transform: [{ translateY: sonucAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
             <View style={styles.sonucBaslik}>
               <View style={styles.basariBadge}>
                 <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
                 <Text style={styles.basariMetin}>Çözüm Oluşturuldu</Text>
               </View>
-              <View style={styles.konuBadge}>
-                <Text style={styles.konuMetin}>Türev</Text>
-              </View>
+              {!!(sonuc.ders || sonuc.konu) && (
+                <View style={styles.konuBadge}>
+                  <Text style={styles.konuMetin}>{[sonuc.ders, sonuc.konu].filter(Boolean).join(' · ')}</Text>
+                </View>
+              )}
             </View>
 
-            <View style={styles.ayirici} />
+            {!!sonuc.yanit && <Text style={styles.yanitMetin}>{sonuc.yanit}</Text>}
 
-            <Text style={styles.ocrEtiket}>Tespit Edilen Soru</Text>
-            <Text style={styles.ocrMetin}>f(x) = x² fonksiyonunun türevini bulunuz.</Text>
-
-            <View style={styles.ayirici} />
-
-            <Text style={styles.cozumEtiket}>Çözüm</Text>
-            <Text style={styles.cozumMetin}>
-              f(x) = x² için türev kuralı uygulanır:{'\n\n'}
-              {'   '}f′(x) = 2·x²⁻¹ = <Text style={styles.vurgu}>2x</Text>
-            </Text>
+            {sonuc.kartlar.map((k, i) => (
+              <KartRenderer
+                key={i}
+                kart={k}
+                cikti
+                onKartGuncelle={(yeni) => kartGuncelle(i, yeni)}
+                onAksiyon={() => {}}
+              />
+            ))}
 
             <TouchableOpacity style={styles.tekrarBtn} onPress={sifirla} activeOpacity={0.8}>
               <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
@@ -320,12 +340,9 @@ const styles = StyleSheet.create({
   progressOn: { height: 4, backgroundColor: COLORS.primary, borderRadius: 2 },
   progressEtiket: { fontSize: 12, color: COLORS.textLight },
 
-  sonucKart: {
-    backgroundColor: COLORS.card, borderRadius: 16,
-    borderWidth: 1, borderColor: COLORS.cardBorder,
-    padding: 18, gap: 0,
-  },
-  sonucBaslik: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  sonucAlani: { gap: 12 },
+  yanitMetin: { fontSize: 14, lineHeight: 20, color: COLORS.text },
+  sonucBaslik: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   basariBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   basariMetin: { fontSize: 14, fontWeight: '700', color: COLORS.success },
   konuBadge: {
