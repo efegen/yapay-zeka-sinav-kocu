@@ -15,7 +15,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Timestamp } from 'firebase/firestore';
 import { auth } from '../../services/firebaseConfig';
 import {
@@ -65,12 +64,6 @@ function ayniGunMu(a: Date, b: Date): boolean {
   );
 }
 
-function saatFormatla(tarih: Timestamp | null): string {
-  if (!tarih) return '';
-  const d = tarih.toDate();
-  return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-}
-
 function sureMetni(dk: number): string {
   if (!dk) return '0 dk';
   const s = Math.floor(dk / 60);
@@ -88,7 +81,6 @@ const BOŞ_FORM = {
   tip: 'planned' as GorevTip,
   deneme: false,
   sure: '25',
-  saat: new Date(),
 };
 
 export default function Takvim() {
@@ -110,7 +102,6 @@ export default function Takvim() {
 
   const [gorevModalAcik, setGorevModalAcik] = useState(false);
   const [form, setForm] = useState({ ...BOŞ_FORM });
-  const [saatPickerAcik, setSaatPickerAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
 
   const uid = auth.currentUser?.uid;
@@ -267,9 +258,10 @@ export default function Takvim() {
     try {
       let tarih: Timestamp | null = null;
       if (form.tip === 'planned') {
-        const combined = new Date(secilenTarih);
-        combined.setHours(form.saat.getHours(), form.saat.getMinutes(), 0, 0);
-        tarih = Timestamp.fromDate(combined);
+        // Saat yok: görev yalnızca o güne ait (gece yarısı = saf tarih işareti).
+        const gun = new Date(secilenTarih);
+        gun.setHours(0, 0, 0, 0);
+        tarih = Timestamp.fromDate(gun);
       }
       await gorevEkle(uid, {
         baslik: form.baslik.trim(),
@@ -281,7 +273,7 @@ export default function Takvim() {
         tamamlandi: false,
       });
       setGorevModalAcik(false);
-      setForm({ ...BOŞ_FORM, saat: new Date() });
+      setForm({ ...BOŞ_FORM });
       await ayYukle();
     } catch (err) {
       console.error('[Takvim] kaydet hatası:', err);
@@ -292,8 +284,7 @@ export default function Takvim() {
 
   function modalKapat() {
     setGorevModalAcik(false);
-    setForm({ ...BOŞ_FORM, saat: new Date() });
-    setSaatPickerAcik(false);
+    setForm({ ...BOŞ_FORM });
   }
 
   function planAc(g: Gorev) {
@@ -446,7 +437,6 @@ export default function Takvim() {
                     <PlanKarti
                       key={g.id}
                       gorev={g}
-                      saatGoster={false}
                       onPress={() => planAc(g)}
                       onToggle={() => tamamlaToggle(g)}
                       onLongPress={() => silOnay(g)}
@@ -533,66 +523,16 @@ export default function Takvim() {
             </View>
 
             {form.tip === 'planned' && (
-              <>
-                <TouchableOpacity
-                  style={styles.denemeSatir}
-                  onPress={() => setForm((f) => ({ ...f, deneme: !f.deneme }))}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.denemeKutu, form.deneme && styles.denemeKutuAktif]}>
-                    {form.deneme && <Ionicons name="checkmark" size={13} color="#fff" />}
-                  </View>
-                  <Text style={styles.denemeMetin}>Bu bir deneme sınavı</Text>
-                </TouchableOpacity>
-
-                <View style={styles.alan}>
-                  <Text style={styles.alanEtiket}>Saat</Text>
-                  <TouchableOpacity
-                    style={styles.inputSarici}
-                    onPress={() => setSaatPickerAcik(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="time-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
-                    <Text style={[styles.input, { color: COLORS.text }]}>
-                      {form.saat.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    <Ionicons name="chevron-down-outline" size={16} color={COLORS.textLight} />
-                  </TouchableOpacity>
-
-                  {saatPickerAcik && Platform.OS === 'ios' && (
-                    <View style={styles.iosPickerSarici}>
-                      <DateTimePicker
-                        value={form.saat}
-                        mode="time"
-                        display="spinner"
-                        onChange={(_: DateTimePickerEvent, d?: Date) => {
-                          if (d) setForm((f) => ({ ...f, saat: d }));
-                        }}
-                        locale="tr-TR"
-                        themeVariant="light"
-                      />
-                      <TouchableOpacity
-                        style={styles.iosPickerTamam}
-                        onPress={() => setSaatPickerAcik(false)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.iosPickerTamamMetin}>Tamam</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  {saatPickerAcik && Platform.OS === 'android' && (
-                    <DateTimePicker
-                      value={form.saat}
-                      mode="time"
-                      display="default"
-                      onChange={(_: DateTimePickerEvent, d?: Date) => {
-                        setSaatPickerAcik(false);
-                        if (d) setForm((f) => ({ ...f, saat: d }));
-                      }}
-                    />
-                  )}
+              <TouchableOpacity
+                style={styles.denemeSatir}
+                onPress={() => setForm((f) => ({ ...f, deneme: !f.deneme }))}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.denemeKutu, form.deneme && styles.denemeKutuAktif]}>
+                  {form.deneme && <Ionicons name="checkmark" size={13} color="#fff" />}
                 </View>
-              </>
+                <Text style={styles.denemeMetin}>Bu bir deneme sınavı</Text>
+              </TouchableOpacity>
             )}
 
             <View style={styles.alan}>
@@ -708,20 +648,19 @@ function GunHucresi({
 
 function PlanKarti({
   gorev,
-  saatGoster = true,
   onPress,
   onToggle,
   onLongPress,
 }: {
   gorev: Gorev;
-  saatGoster?: boolean;
   onPress: () => void;
   onToggle: () => void;
   onLongPress: () => void;
 }) {
   const renk = dersRenk(gorev.ders);
-  const bas = saatFormatla(gorev.tarih);
   const done = gorev.tamamlandi;
+  const adimSay = gorev.adimlar?.length ?? 0;
+  const bitenAdim = gorev.adimlar?.filter((a) => a.done).length ?? 0;
 
   return (
     <TouchableOpacity
@@ -733,12 +672,6 @@ function PlanKarti({
     >
       <View style={[planStyles.solSerit, { backgroundColor: renk }]} />
       <View style={planStyles.icerik}>
-        {saatGoster && !!bas && (
-          <View style={planStyles.saatKutu}>
-            <Text style={planStyles.saat}>{bas}</Text>
-            <Text style={planStyles.saatSure}>{gorev.sure} dk</Text>
-          </View>
-        )}
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={planStyles.dersSatir}>
             <View style={[planStyles.dersNokta, { backgroundColor: renk }]} />
@@ -749,11 +682,13 @@ function PlanKarti({
           <Text style={[planStyles.konu, done && planStyles.konuDone]} numberOfLines={2}>
             {gorev.baslik}
           </Text>
-          {!!gorev.adimlar?.length && (
-            <Text style={planStyles.adimMeta}>
-              {gorev.adimlar.filter((a) => a.done).length}/{gorev.adimlar.length} adım
+          <View style={planStyles.metaSatir}>
+            <Ionicons name="timer-outline" size={11} color={COLORS.textLight} />
+            <Text style={planStyles.meta}>
+              {sureMetni(gorev.sure)}
+              {adimSay > 0 ? ` · ${bitenAdim}/${adimSay} adım` : ''}
             </Text>
-          )}
+          </View>
         </View>
         <TouchableOpacity onPress={onToggle} hitSlop={8} activeOpacity={0.7}>
           <View style={[planStyles.check, done && { backgroundColor: COLORS.success, borderColor: COLORS.success }]}>
@@ -766,7 +701,6 @@ function PlanKarti({
 }
 
 function DenemeKarti({ gorev, onLongPress }: { gorev: Gorev; onLongPress: () => void }) {
-  const bas = saatFormatla(gorev.tarih);
   return (
     <TouchableOpacity style={denemeStyles.kart} onLongPress={onLongPress} delayLongPress={450} activeOpacity={0.85}>
       <View style={denemeStyles.ikonKutu}>
@@ -774,9 +708,7 @@ function DenemeKarti({ gorev, onLongPress }: { gorev: Gorev; onLongPress: () => 
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={denemeStyles.ad} numberOfLines={1}>{gorev.baslik}</Text>
-        <Text style={denemeStyles.meta}>
-          {bas ? `${bas} · ` : ''}{sureMetni(gorev.sure)}
-        </Text>
+        <Text style={denemeStyles.meta}>{sureMetni(gorev.sure)}</Text>
       </View>
       <View style={denemeStyles.rozet}>
         <Text style={denemeStyles.rozetMetin}>Deneme</Text>
@@ -1056,23 +988,6 @@ const styles = StyleSheet.create({
   segmentMetin: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
   segmentMetinAktif: { color: '#fff' },
 
-  iosPickerSarici: {
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  iosPickerTamam: {
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.cardBorder,
-  },
-  iosPickerTamamMetin: { fontSize: 15, fontWeight: '600', color: PRIMARY },
-
   butonlar: { flexDirection: 'row', gap: 10, marginTop: 8 },
   iptalButon: {
     flex: 1,
@@ -1107,15 +1022,13 @@ const planStyles = StyleSheet.create({
   },
   solSerit: { width: 4 },
   icerik: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
-  saatKutu: { width: 46 },
-  saat: { fontSize: 13, fontWeight: '800', color: COLORS.text },
-  saatSure: { fontSize: 11, fontWeight: '600', color: COLORS.textLight },
   dersSatir: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 },
   dersNokta: { width: 7, height: 7, borderRadius: 99 },
   dersEtiket: { fontSize: 11.5, fontWeight: '700' },
   konu: { fontSize: 13.5, fontWeight: '600', color: COLORS.text },
   konuDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
-  adimMeta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight, marginTop: 3 },
+  metaSatir: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  meta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight },
   check: {
     width: 24,
     height: 24,

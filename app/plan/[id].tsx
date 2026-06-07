@@ -36,15 +36,6 @@ function ssFormat(saniye: number): string {
   return `${dk}:${ikiHane(sn)}`;
 }
 
-function saatAralik(gorev: Gorev | null): string | null {
-  if (!gorev?.tarih) return null;
-  const bas = gorev.tarih.toDate();
-  const bit = new Date(bas.getTime() + (gorev.sure || 0) * 60000);
-  const f = (d: Date) =>
-    d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  return `${f(bas)} – ${f(bit)}`;
-}
-
 export default function PlanDetay() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -157,7 +148,6 @@ export default function PlanDetay() {
   const toplamDk = adimlar.reduce((t, a) => t + (a.dk || 0), 0) || gorev?.sure || 0;
   const bitenSay = adimlar.filter((a) => a.done).length;
   const siradaIndex = adimlar.findIndex((a) => !a.done);
-  const aralik = saatAralik(gorev);
 
   // ── Render durumları ──
   if (yukleniyor) {
@@ -234,7 +224,6 @@ export default function PlanDetay() {
             gorev={gorev}
             adimlar={adimlar}
             toplamDk={toplamDk}
-            aralik={aralik}
             bitenSay={bitenSay}
             siradaIndex={siradaIndex}
             onBasla={adimBasla}
@@ -275,13 +264,11 @@ function Hero({
   gorev,
   toplamDk,
   adet,
-  aralik,
 }: {
   renk: string;
   gorev: Gorev;
   toplamDk: number;
   adet: number;
-  aralik: string | null;
 }) {
   return (
     <View style={{ marginBottom: 16 }}>
@@ -291,12 +278,6 @@ function Hero({
       </View>
       <Text style={styles.heroKonu}>{gorev.baslik}</Text>
       <View style={styles.heroMetaSatir}>
-        {!!aralik && (
-          <View style={styles.heroMeta}>
-            <Ionicons name="time-outline" size={15} color={COLORS.textSecondary} />
-            <Text style={styles.heroMetaMetin}>{aralik}</Text>
-          </View>
-        )}
         <View style={styles.heroMeta}>
           <Ionicons name="timer-outline" size={15} color={COLORS.textSecondary} />
           <Text style={styles.heroMetaMetin}>
@@ -315,7 +296,6 @@ function ListeGorunum({
   gorev,
   adimlar,
   toplamDk,
-  aralik,
   bitenSay,
   siradaIndex,
   onBasla,
@@ -325,7 +305,6 @@ function ListeGorunum({
   gorev: Gorev;
   adimlar: Adim[];
   toplamDk: number;
-  aralik: string | null;
   bitenSay: number;
   siradaIndex: number;
   onBasla: (i: number) => void;
@@ -333,7 +312,7 @@ function ListeGorunum({
 }) {
   return (
     <>
-      <Hero renk={renk} gorev={gorev} toplamDk={toplamDk} adet={adimlar.length} aralik={aralik} />
+      <Hero renk={renk} gorev={gorev} toplamDk={toplamDk} adet={adimlar.length} />
 
       <View style={styles.bolumBaslikSatir}>
         <Text style={styles.bolumBaslik}>Çalışma adımları</Text>
