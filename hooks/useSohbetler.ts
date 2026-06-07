@@ -29,6 +29,8 @@ export function useSohbetler(uid?: string) {
   // Senkron okuma için ref aynaları (async/closure'larda güncel değer gerekir).
   const aktifIdRef = useRef<string | null>(null);
   const sohbetlerRef = useRef<Sohbet[]>([]);
+  // Auth yeni mi çözüldü (önceki uid yoktu mu) — auth öncesi bellekteki sohbeti korumak için.
+  const oncekiUidRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     sohbetlerRef.current = sohbetler;
   }, [sohbetler]);
@@ -43,12 +45,16 @@ export function useSohbetler(uid?: string) {
     let iptal = false;
     setYuklendi(false);
     if (!uid) {
+      oncekiUidRef.current = undefined;
       // Oturum henüz çözülmediyse: bellekte boş bir aktif sohbet — sohbet çalışır, kalıcıya yazılmaz.
       const yeni = bosSohbet();
       setSohbetler([yeni]);
       setAktif(yeni.id);
       return;
     }
+    // Auth YENİ çözüldüyse (önceki uid yoktu), auth öncesi başlamış bellekteki sohbeti koru.
+    const authYeniCozuldu = !oncekiUidRef.current;
+    oncekiUidRef.current = uid;
     (async () => {
       let liste: Sohbet[] = [];
       try {
@@ -59,6 +65,14 @@ export function useSohbetler(uid?: string) {
         liste = sirala(ayristir(ham, eski));
       } catch {}
       if (iptal) return;
+      // Auth çözülmeden önce başlanan (henüz kaydedilmemiş) aktif sohbeti kaybetme: mesajı varsa
+      // yüklenen listeye kat. Yoksa yenileme sırasında auth öncesi yazılanlar boş listeyle ezilirdi.
+      if (authYeniCozuldu) {
+        const bekleyen = sohbetlerRef.current.find((s) => s.id === aktifIdRef.current);
+        if (bekleyen && bekleyen.mesajlar.length > 0 && !liste.some((s) => s.id === bekleyen.id)) {
+          liste = sirala([bekleyen, ...liste]);
+        }
+      }
       if (liste.length) {
         setSohbetler(liste);
         setAktif(liste[0].id); // en güncel sohbeti sürdür

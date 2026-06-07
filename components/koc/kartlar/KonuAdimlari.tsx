@@ -5,6 +5,7 @@ import { COLORS } from '../../../constants/colors';
 import type { KonuAdimlariVeri } from '../../../types/koc';
 import { Press } from '../Press';
 import { KocButon } from '../KocButon';
+import { Formul, iceriyorMat } from '../Formul';
 import { RADIUS } from '../tokens';
 import type { KartBilesenProps } from './_ortak';
 
@@ -36,7 +37,14 @@ export function KonuAdimlari({ veri, onGuncelle, onAksiyon }: KartBilesenProps<K
               <View style={[s.kutu, on ? s.kutuDolu : s.kutuBos]}>
                 {on && <Ionicons name="checkmark" size={13} color="#fff" />}
               </View>
-              <Text style={[s.adimMetin, on && s.adimMetinDolu]}>{a}</Text>
+              {iceriyorMat(a) ? (
+                // Güvenlik ağı: adım metni matematik içeriyorsa ham $...$ göstermek yerine render et.
+                <View style={{ flex: 1 }}>
+                  <Formul icerik={a} renk={on ? COLORS.textLight : COLORS.text} boyut={13.5} />
+                </View>
+              ) : (
+                <Text style={[s.adimMetin, on && s.adimMetinDolu]}>{a}</Text>
+              )}
             </Press>
           );
         })}
@@ -49,7 +57,16 @@ export function KonuAdimlari({ veri, onGuncelle, onAksiyon }: KartBilesenProps<K
               etiket={ak.etiket}
               varyant={ak.birincil ? 'birincil' : 'ikincil'}
               esnek={ak.birincil}
-              onPress={() => onAksiyon(undefined, ak.etiket)}
+              // Çıplak etiketi ("Türev sorusu çöz") göndermek modele belirsiz gelir, sohbete
+              // dönüp soru üretmez. Konu bağlamlı açık bir istek gönder → koç GERÇEK örnek soru üretir.
+              onPress={() =>
+                onAksiyon(
+                  undefined,
+                  veri.konu
+                    ? `${veri.konu} konusundan çözebileceğim örnek bir soru hazırla. Önce soruyu yaz, sonra adım adım çöz.`
+                    : ak.etiket
+                )
+              }
             />
           ))}
         </View>

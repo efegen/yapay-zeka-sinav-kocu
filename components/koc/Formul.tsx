@@ -47,13 +47,20 @@ function kacislariDuzelt(s: string): string {
 }
 
 /**
- * Güvenlik ağı: model bazen LaTeX'i (\frac{1}{3} gibi) $...$ olmadan yazıyor → ham kalıyor.
- * Zaten $...$ içinde olanları KORUR; dışarıda kalan çıplak \komut'ları $...$ ile sarar.
+ * Güvenlik ağı: model bazen LaTeX'i ($...$ olmadan) ham yazıyor → ekranda ham kalıyor.
+ * Zaten $...$ / $$...$$ içinde olanları KORUR. İki tür çıplak içeriği sarar:
+ *  1) `\begin{...}...\end{...}` ortamı (aligned, cases vb.) → TÜM blok $$...$$ ile sarılır.
+ *     (Tek tek \begin/\end sarılırsa ortam ikiye bölünür, KaTeX hata verir → kırmızı ham metin.)
+ *  2) Geriye kalan tekil çıplak \komut'lar (\frac vb.) → $...$ ile sarılır.
  */
 function latexGuvenli(s: string): string {
   return s
-    .split(/(\$\$[^$]*\$\$|\$[^$]*\$)/g)
-    .map((p) => (p.startsWith('$') ? p : p.replace(/\\[a-zA-Z]+(?:\{[^{}]*\}){0,2}/g, (m) => `$${m}$`)))
+    .split(/(\$\$[^$]*\$\$|\$[^$]*\$|\\begin\{[a-zA-Z]+\*?\}[\s\S]*?\\end\{[a-zA-Z]+\*?\})/g)
+    .map((p) => {
+      if (p.startsWith('$')) return p; // zaten math
+      if (p.startsWith('\\begin')) return `$$${p}$$`; // çıplak ortamı blok math olarak sar
+      return p.replace(/\\[a-zA-Z]+(?:\{[^{}]*\}){0,2}/g, (m) => `$${m}$`);
+    })
     .join('');
 }
 

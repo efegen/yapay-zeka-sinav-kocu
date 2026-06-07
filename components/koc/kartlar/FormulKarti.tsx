@@ -5,6 +5,7 @@ import { COLORS } from '../../../constants/colors';
 import type { FormulKartiVeri } from '../../../types/koc';
 import { Press } from '../Press';
 import { Gradyan } from '../Gradyan';
+import { Formul, iceriyorMat } from '../Formul';
 import { SERIF, RADIUS } from '../tokens';
 import type { KartBilesenProps } from './_ortak';
 
@@ -25,11 +26,25 @@ export function FormulKarti({ veri, onGuncelle }: KartBilesenProps<FormulKartiVe
       <View style={{ paddingHorizontal: 15, paddingTop: 6, paddingBottom: 4 }}>
         {(veri.formuller ?? []).map((f, i) => (
           <View key={i} style={[s.formul, i > 0 && s.ustCizgi]}>
-            <Text style={s.sol}>
-              {f.sol} {!!f.not && <Text style={s.not}>({f.not})</Text>}
-            </Text>
+            {/* Model formülleri LaTeX yazar ($...$); ham göstermemek için math varsa Formul ile render et. */}
+            {iceriyorMat(f.sol) ? (
+              <View style={{ flex: 1 }}>
+                <Formul icerik={f.sol} renk={COLORS.text} boyut={15} />
+                {!!f.not && <Text style={s.not}>({f.not})</Text>}
+              </View>
+            ) : (
+              <Text style={s.sol}>
+                {f.sol} {!!f.not && <Text style={s.not}>({f.not})</Text>}
+              </Text>
+            )}
             <Ionicons name="arrow-forward" size={16} color={COLORS.textLight} />
-            <Text style={s.sag}>{f.sag}</Text>
+            {iceriyorMat(f.sag) ? (
+              <View style={{ minWidth: 30 }}>
+                <Formul icerik={f.sag} renk={COLORS.accent} boyut={17} kalin hizala="center" />
+              </View>
+            ) : (
+              <Text style={s.sag}>{f.sag}</Text>
+            )}
           </View>
         ))}
       </View>

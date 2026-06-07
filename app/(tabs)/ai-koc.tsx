@@ -13,10 +13,11 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../services/firebaseConfig';
 import { useProfile } from '../../hooks/useProfile';
 import { useKocHafiza } from '../../hooks/useKocHafiza';
@@ -65,7 +66,11 @@ export default function AiKoc() {
   const router = useRouter();
   const { profil } = useProfile();
   const { hafiza } = useKocHafiza();
-  const uid = auth.currentUser?.uid;
+  // Auth restorasyonu web'de asenkrondur: mount anında currentUser null olabilir. uid'i tek sefer
+  // okumak yerine auth durumunu DİNLE ki sohbet geçmişi (ve hafıza yazımı) hazır olunca doğru
+  // kullanıcı anahtarıyla yüklensin/kaydedilsin. (Aynı yarış useProfile/useKocHafiza'da çözülmüştü.)
+  const [uid, setUid] = useState<string | undefined>(() => auth.currentUser?.uid);
+  useEffect(() => onAuthStateChanged(auth, (k) => setUid(k?.uid)), []);
 
   // Çoklu sohbet deposu — aktif sohbetin mesajları tek doğruluk kaynağı.
   const { aktifMesajlar: mesajlar, aktifId, gecmis, mesajlariGuncelle, yeniSohbet, sohbetSec, tumunuTemizle } =
