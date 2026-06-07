@@ -8,7 +8,6 @@ import {
   deleteDoc,
   query,
   where,
-  orderBy,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
@@ -199,12 +198,11 @@ export const gorevEkle = async (
 };
 
 /**
- * Returns tasks for a given calendar day.
+ * Belirli bir takvim gününün görevlerini döndürür.
  *
- * IMPORTANT — two composite Firestore indexes are required on the `gorevler` subcollection:
- *   1. planned query  → fields: tip ASC, tarih ASC
- *   2. anytime query  → fields: tip ASC, tamamlandi ASC, olusturmaTarihi ASC
- * Create them in Firebase Console → Firestore Database → Indexes → Composite → Add index.
+ * Not: Sorgular bilinçli olarak TEK ALANLIDIR (composite index GEREKTİRMEZ);
+ * `tip`/`tamamlandi` filtresi ve sıralama JS tarafında yapılır. Böylece projeye
+ * Firestore'da elle index oluşturma zorunluluğu binmez.
  */
 export const gunGorevleriniGetir = async (
   uid: string,
@@ -217,32 +215,31 @@ export const gunGorevleriniGetir = async (
   const gunBitis = new Date(tarih);
   gunBitis.setHours(23, 59, 59, 999);
 
-  // Composite index required: tip ASC, tarih ASC
+  // Tek-alan tarih aralığı (anytime görevler tarih=null olduğu için kapsam dışı).
   const plannedQuery = query(
     kolRef,
-    where('tip', '==', 'planned'),
     where('tarih', '>=', Timestamp.fromDate(gunBaslangic)),
-    where('tarih', '<=', Timestamp.fromDate(gunBitis)),
-    orderBy('tarih', 'asc')
+    where('tarih', '<=', Timestamp.fromDate(gunBitis))
   );
-
-  // Composite index required: tip ASC, tamamlandi ASC, olusturmaTarihi ASC
-  const anytimeQuery = query(
-    kolRef,
-    where('tip', '==', 'anytime'),
-    where('tamamlandi', '==', false),
-    orderBy('olusturmaTarihi', 'asc')
-  );
+  // Tek-alan eşitlik.
+  const anytimeQuery = query(kolRef, where('tip', '==', 'anytime'));
 
   const [plannedSnap, anytimeSnap] = await Promise.all([
     getDocs(plannedQuery),
     getDocs(anytimeQuery),
   ]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const planned: Gorev[] = plannedSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anytime: Gorev[] = anytimeSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  const planned: Gorev[] = plannedSnap.docs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((d) => ({ id: d.id, ...(d.data() as any) }) as Gorev)
+    .filter((g) => g.tip === 'planned')
+    .sort((a, b) => (a.tarih?.toMillis() ?? 0) - (b.tarih?.toMillis() ?? 0));
+
+  const anytime: Gorev[] = anytimeSnap.docs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((d) => ({ id: d.id, ...(d.data() as any) }) as Gorev)
+    .filter((g) => !g.tamamlandi)
+    .sort((a, b) => (a.olusturmaTarihi?.toMillis() ?? 0) - (b.olusturmaTarihi?.toMillis() ?? 0));
 
   return { planned, anytime };
 };
@@ -251,7 +248,7 @@ export const gunGorevleriniGetir = async (
  * Bir takvim ayındaki tüm planlanmış görevleri getirir (ızgara noktaları +
  * gün ajandası için). `ay` 0-tabanlıdır (0 = Ocak).
  *
- * Composite index gerekir: tip ASC, tarih ASC (planned sorgusuyla aynı).
+ * Tek-alan tarih aralığı sorgusu → composite index gerektirmez.
  */
 export const ayGorevleriniGetir = async (
   uid: string,
@@ -265,15 +262,18 @@ export const ayGorevleriniGetir = async (
 
   const ayQuery = query(
     kolRef,
-    where('tip', '==', 'planned'),
     where('tarih', '>=', Timestamp.fromDate(ayBaslangic)),
-    where('tarih', '<=', Timestamp.fromDate(aySonu)),
-    orderBy('tarih', 'asc')
+    where('tarih', '<=', Timestamp.fromDate(aySonu))
   );
 
   const snap = await getDocs(ayQuery);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  return (
+    snap.docs
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((d) => ({ id: d.id, ...(d.data() as any) }) as Gorev)
+      .filter((g) => g.tip === 'planned')
+      .sort((a, b) => (a.tarih?.toMillis() ?? 0) - (b.tarih?.toMillis() ?? 0))
+  );
 };
 
 export const gorevGetir = async (
