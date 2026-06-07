@@ -10,6 +10,7 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="soru-yukle" />
+        <Stack.Screen name="plan/[id]" />
       </Stack>
     </PlanProvider>
   );

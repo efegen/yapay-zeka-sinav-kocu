@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter, useFocusEffect } from 'expo-router';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Timestamp } from 'firebase/firestore';
 import { auth } from '../../services/firebaseConfig';
@@ -22,16 +24,19 @@ import {
   gorevEkle,
   gorevSil,
   gorevTamamla,
+  ayGorevleriniGetir,
   gunGorevleriniGetir,
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
+import { DERSLER, dersRenk } from '../../constants/dersler';
+import { YKS_TARIHI } from '../../constants/sinav';
+import { Ring } from '../../components/koc/Ring';
 import { bildir } from '../../utils/bildirim';
 
 const PRIMARY = COLORS.primary;
-const TEAL = '#00BFA5';
 
-const GUN_KISALTMALARI = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-const GUN_ADLARI = [
+const GUN_KISALTMALARI = ['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pz'];
+const GUN_ADLARI_TAM = [
   'Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi',
 ];
 const AY_ADLARI = [
@@ -39,19 +44,17 @@ const AY_ADLARI = [
   'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
 ];
 
-function pazartesiBaslangicGunIndeksi(gun: number): number {
-  return (gun + 6) % 7;
-}
+// YKS oturumları — TYT sınav günü ve ertesi gün AYT.
+const TYT_TARIHI = YKS_TARIHI;
+const AYT_TARIHI = new Date(
+  YKS_TARIHI.getFullYear(),
+  YKS_TARIHI.getMonth(),
+  YKS_TARIHI.getDate() + 1
+);
 
-function haftaGunleriniGetir(tarih: Date): Date[] {
-  const monday = new Date(tarih);
-  monday.setDate(tarih.getDate() - pazartesiBaslangicGunIndeksi(tarih.getDay()));
-  monday.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return d;
-  });
+// Pazartesi-başlangıçlı gün indeksi (0 = Pazartesi).
+function pazartesiIndeksi(jsGun: number): number {
+  return (jsGun + 6) % 7;
 }
 
 function ayniGunMu(a: Date, b: Date): boolean {
@@ -62,97 +65,197 @@ function ayniGunMu(a: Date, b: Date): boolean {
   );
 }
 
-function tarihDetayiFormatla(tarih: Date): string {
-  return `${tarih.getDate()} ${AY_ADLARI[tarih.getMonth()]} ${tarih.getFullYear()}`;
+function saatFormatla(tarih: Timestamp | null): string {
+  if (!tarih) return '';
+  const d = tarih.toDate();
+  return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function sureMetni(dk: number): string {
+  if (!dk) return '0 dk';
+  const s = Math.floor(dk / 60);
+  const k = dk % 60;
+  return s ? (k ? `${s}s ${k}dk` : `${s} saat`) : `${k} dk`;
+}
+
+function gunMu(g: Gorev, gun: number): boolean {
+  return !!g.tarih && g.tarih.toDate().getDate() === gun;
 }
 
 const BOŞ_FORM = {
   baslik: '',
+  ders: 'Matematik',
   tip: 'planned' as GorevTip,
+  deneme: false,
   sure: '25',
   saat: new Date(),
 };
 
 export default function Takvim() {
-  const [secilenTarih, setSecilenTarih] = useState(() => {
-    const bugun = new Date();
-    bugun.setHours(0, 0, 0, 0);
-    return bugun;
-  });
-  const [planlananGorevler, setPlanlananGorevler] = useState<Gorev[]>([]);
-  const [istediginZamanGorevler, setIstediginZamanGorevler] = useState<Gorev[]>([]);
+  const router = useRouter();
+  const bugun = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t;
+  }, []);
+
+  const [goruntulenen, setGoruntulenen] = useState(() => ({
+    ay: bugun.getMonth(),
+    yil: bugun.getFullYear(),
+  }));
+  const [secilenTarih, setSecilenTarih] = useState<Date>(bugun);
+  const [ayGorevleri, setAyGorevleri] = useState<Gorev[]>([]);
+  const [istediginZaman, setIstediginZaman] = useState<Gorev[]>([]);
   const [yukleniyor, setYukleniyor] = useState(false);
+
   const [gorevModalAcik, setGorevModalAcik] = useState(false);
-  const [ayTakvimAcik, setAyTakvimAcik] = useState(false);
   const [form, setForm] = useState({ ...BOŞ_FORM });
   const [saatPickerAcik, setSaatPickerAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
 
   const uid = auth.currentUser?.uid;
 
-  const gorevleriYukle = useCallback(async () => {
+  const ayYukle = useCallback(async () => {
     if (!uid) return;
     setYukleniyor(true);
     try {
-      const { planned, anytime } = await gunGorevleriniGetir(uid, secilenTarih);
-      setPlanlananGorevler(planned);
-      setIstediginZamanGorevler(anytime);
+      // anytime sorgusu tarihten bağımsızdır; sabit bir referans tarih yeterli.
+      const [planned, gunVerisi] = await Promise.all([
+        ayGorevleriniGetir(uid, goruntulenen.yil, goruntulenen.ay),
+        gunGorevleriniGetir(uid, bugun),
+      ]);
+      setAyGorevleri(planned);
+      setIstediginZaman(gunVerisi.anytime);
     } catch (err) {
-      console.error('[Takvim] gorevleriYukle hatası:', err);
+      console.error('[Takvim] ayYukle hatası:', err);
     } finally {
       setYukleniyor(false);
     }
-  }, [uid, secilenTarih]);
+  }, [uid, goruntulenen.yil, goruntulenen.ay, bugun]);
 
   useEffect(() => {
-    gorevleriYukle();
-  }, [gorevleriYukle]);
+    ayYukle();
+  }, [uid, goruntulenen.yil, goruntulenen.ay]);
 
-  function buguneGit() {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    setSecilenTarih(t);
-  }
+  // Plan detayından dönüldüğünde (adım tamamlama vb.) listeyi tazele.
+  useFocusEffect(
+    useCallback(() => {
+      ayYukle();
+    }, [ayYukle])
+  );
 
-  function haftaDegistir(delta: number) {
-    setSecilenTarih((prev) => {
-      const yeni = new Date(prev);
-      yeni.setDate(prev.getDate() + delta);
-      return yeni;
+  function ayDegistir(delta: number) {
+    setGoruntulenen((prev) => {
+      let ay = prev.ay + delta;
+      let yil = prev.yil;
+      if (ay < 0) { ay = 11; yil--; }
+      if (ay > 11) { ay = 0; yil++; }
+      // Seçili günü yeni aya taşı: bu ay bugünü içeriyorsa bugün, değilse 1'i.
+      const yeniSecili =
+        yil === bugun.getFullYear() && ay === bugun.getMonth()
+          ? new Date(bugun)
+          : new Date(yil, ay, 1);
+      setSecilenTarih(yeniSecili);
+      return { ay, yil };
     });
   }
 
-  async function tamamlaToggle(gorevId: string, mevcutDurum: boolean) {
+  // ── Izgara verisi ──
+  const ilkGun = new Date(goruntulenen.yil, goruntulenen.ay, 1);
+  const gunSayisi = new Date(goruntulenen.yil, goruntulenen.ay + 1, 0).getDate();
+  const onOfset = pazartesiIndeksi(ilkGun.getDay());
+  const hucreler: number[] = [
+    ...Array(onOfset).fill(0),
+    ...Array.from({ length: gunSayisi }, (_, i) => i + 1),
+  ];
+  while (hucreler.length % 7 !== 0) hucreler.push(0);
+  const haftalar: number[][] = [];
+  for (let i = 0; i < hucreler.length; i += 7) haftalar.push(hucreler.slice(i, i + 7));
+
+  const sinavBuAy =
+    goruntulenen.yil === TYT_TARIHI.getFullYear() && goruntulenen.ay === TYT_TARIHI.getMonth();
+
+  function sinavGunuMu(gun: number): 'tyt' | 'ayt' | null {
+    if (!sinavBuAy) return null;
+    if (gun === TYT_TARIHI.getDate()) return 'tyt';
+    if (gun === AYT_TARIHI.getDate()) return 'ayt';
+    return null;
+  }
+
+  // Gün → o günün renk noktaları (en çok 3 farklı ders rengi).
+  function gunNoktalari(gun: number): string[] {
+    const renkler: string[] = [];
+    ayGorevleri.forEach((g) => {
+      if (gunMu(g, gun) && g.tur !== 'deneme') {
+        const r = dersRenk(g.ders);
+        if (!renkler.includes(r)) renkler.push(r);
+      }
+    });
+    return renkler.slice(0, 3);
+  }
+
+  function denemeGunuMu(gun: number): boolean {
+    return ayGorevleri.some((g) => gunMu(g, gun) && g.tur === 'deneme');
+  }
+
+  // ── Seçili gün ajandası ──
+  const seciliGun = secilenTarih.getDate();
+  const seciliAyMi =
+    secilenTarih.getMonth() === goruntulenen.ay &&
+    secilenTarih.getFullYear() === goruntulenen.yil;
+
+  const gunPlanlari = useMemo(() => {
+    if (!seciliAyMi) return [];
+    return ayGorevleri
+      .filter((g) => gunMu(g, seciliGun))
+      .sort((a, b) => {
+        const ta = a.tarih ? a.tarih.toMillis() : 0;
+        const tb = b.tarih ? b.tarih.toMillis() : 0;
+        return ta - tb;
+      });
+  }, [ayGorevleri, seciliGun, seciliAyMi]);
+
+  const planlar = gunPlanlari.filter((g) => g.tur !== 'deneme');
+  const planSay = planlar.length;
+  const bitenSay = planlar.filter((g) => g.tamamlandi).length;
+  const toplamDk = gunPlanlari.reduce((t, g) => t + (g.sure || 0), 0);
+  const dersNoktalari = [...new Set(planlar.map((g) => dersRenk(g.ders)))].slice(0, 5);
+  const seciliSinav = seciliAyMi ? sinavGunuMu(seciliGun) : null;
+
+  // YKS'ye kalan gün.
+  const geriSayim = Math.max(
+    0,
+    Math.ceil((TYT_TARIHI.getTime() - bugun.getTime()) / 86400000)
+  );
+
+  // ── Görev işlemleri ──
+  async function tamamlaToggle(g: Gorev) {
     if (!uid) return;
     try {
-      await gorevTamamla(uid, gorevId, !mevcutDurum);
-      await gorevleriYukle();
+      await gorevTamamla(uid, g.id, !g.tamamlandi);
+      await ayYukle();
     } catch (err) {
       console.error('[Takvim] tamamlaToggle hatası:', err);
     }
   }
 
-  function silOnay(gorevId: string, baslik: string) {
-    bildir(
-      'Görevi Sil',
-      `"${baslik}" görevini silmek istediğinizden emin misiniz?`,
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Sil',
-          style: 'destructive',
-          onPress: async () => {
-            if (!uid) return;
-            try {
-              await gorevSil(uid, gorevId);
-              await gorevleriYukle();
-            } catch (err) {
-              console.error('[Takvim] gorevSil hatası:', err);
-            }
-          },
+  function silOnay(g: Gorev) {
+    bildir('Görevi Sil', `"${g.baslik}" görevini silmek istediğinizden emin misiniz?`, [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          if (!uid) return;
+          try {
+            await gorevSil(uid, g.id);
+            await ayYukle();
+          } catch (err) {
+            console.error('[Takvim] gorevSil hatası:', err);
+          }
         },
-      ]
-    );
+      },
+    ]);
   }
 
   async function kaydet() {
@@ -170,6 +273,8 @@ export default function Takvim() {
       }
       await gorevEkle(uid, {
         baslik: form.baslik.trim(),
+        ders: form.ders,
+        tur: form.deneme ? 'deneme' : 'plan',
         sure: sureNum,
         tip: form.tip,
         tarih,
@@ -177,7 +282,7 @@ export default function Takvim() {
       });
       setGorevModalAcik(false);
       setForm({ ...BOŞ_FORM, saat: new Date() });
-      await gorevleriYukle();
+      await ayYukle();
     } catch (err) {
       console.error('[Takvim] kaydet hatası:', err);
     } finally {
@@ -191,153 +296,170 @@ export default function Takvim() {
     setSaatPickerAcik(false);
   }
 
-  const haftaGunleri = haftaGunleriniGetir(secilenTarih);
-  const bugun = new Date();
+  function planAc(g: Gorev) {
+    router.push(`/plan/${g.id}`);
+  }
 
   return (
     <View style={styles.ekran}>
-      {/* ─── Header ─── */}
+      {/* ─── Başlık + ay geçişi ─── */}
       <View style={styles.header}>
-        {/* Orta: gün adı + tarih — absolute so it stays centered regardless of side widths */}
-        <View style={styles.headerOrta} pointerEvents="none">
-          <Text style={styles.gunAdi}>{GUN_ADLARI[secilenTarih.getDay()]}</Text>
-          <Text style={styles.tarihDetay}>{tarihDetayiFormatla(secilenTarih)}</Text>
-        </View>
-
-        {/* Sol: Bugün + aylık takvim */}
-        <View style={styles.headerSol}>
-          <TouchableOpacity style={styles.bugunButon} onPress={buguneGit} activeOpacity={0.8}>
-            <Ionicons name="time-outline" size={12} color={PRIMARY} style={{ marginRight: 3 }} />
-            <Text style={styles.bugunMetin}>Bugün</Text>
+        <View style={styles.ayNav}>
+          <TouchableOpacity style={styles.navBtn} onPress={() => ayDegistir(-1)} activeOpacity={0.7} hitSlop={8}>
+            <Ionicons name="chevron-back" size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.ikonButon}
-            onPress={() => setAyTakvimAcik(true)}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="calendar-outline" size={18} color={PRIMARY} />
+          <Text style={styles.ayBaslik}>
+            {AY_ADLARI[goruntulenen.ay]} <Text style={styles.ayYil}>{goruntulenen.yil}</Text>
+          </Text>
+          <TouchableOpacity style={styles.navBtn} onPress={() => ayDegistir(1)} activeOpacity={0.7} hitSlop={8}>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 
-        {/* Sağ: + FAB */}
-        <TouchableOpacity
-          style={styles.fabButon}
-          onPress={() => setGorevModalAcik(true)}
-          activeOpacity={0.8}
+        <LinearGradient
+          colors={[COLORS.primary, COLORS.accent]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.geriSayimPill}
         >
-          <Ionicons name="add" size={22} color="#fff" />
-        </TouchableOpacity>
+          <Ionicons name="flag" size={13} color="#fff" />
+          <Text style={styles.geriSayimMetin}>YKS&apos;ye {geriSayim} gün</Text>
+        </LinearGradient>
       </View>
 
-      {/* ─── Week strip with arrows ─── */}
-      <View style={styles.haftaSeritSarici}>
-        <TouchableOpacity
-          onPress={() => haftaDegistir(-7)}
-          style={styles.okButon}
-          activeOpacity={0.6}
-          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-back" size={18} color={COLORS.textSecondary} />
-        </TouchableOpacity>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
+        {/* hafta günü başlıkları */}
+        <View style={styles.gunBasliklari}>
+          {GUN_KISALTMALARI.map((g, i) => (
+            <Text key={g} style={[styles.gunBaslik, i >= 5 && { color: COLORS.accent }]}>
+              {g}
+            </Text>
+          ))}
+        </View>
 
-        <View style={styles.gunlerSatir}>
-          {haftaGunleri.map((gun, i) => {
-            const secili = ayniGunMu(gun, secilenTarih);
-            const bugunMu = ayniGunMu(gun, bugun);
-            return (
-              <TouchableOpacity
-                key={i}
-                style={styles.gunButon}
-                onPress={() => setSecilenTarih(gun)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.gunKisaltma, secili && styles.seciliGunMetin]}>
-                  {GUN_KISALTMALARI[pazartesiBaslangicGunIndeksi(gun.getDay())]}
-                </Text>
-                <View
-                  style={[
-                    styles.gunDaire,
-                    secili && styles.seciliGunDaire,
-                    bugunMu && !secili && styles.bugunDaire,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.gunSayi,
-                      secili && styles.seciliGunSayiMetin,
-                      bugunMu && !secili && styles.bugunSayiMetin,
-                    ]}
-                  >
-                    {gun.getDate()}
-                  </Text>
+        {/* ızgara */}
+        <View style={styles.izgara}>
+          {haftalar.map((hafta, hi) => (
+            <View key={hi} style={styles.haftaSatiri}>
+              {hafta.map((gun, gi) => (
+                <GunHucresi
+                  key={gi}
+                  gun={gun}
+                  bugunMu={gun > 0 && ayniGunMu(new Date(goruntulenen.yil, goruntulenen.ay, gun), bugun)}
+                  secili={gun > 0 && seciliAyMi && gun === seciliGun}
+                  sinav={gun > 0 ? sinavGunuMu(gun) : null}
+                  deneme={gun > 0 && denemeGunuMu(gun)}
+                  noktalar={gun > 0 ? gunNoktalari(gun) : []}
+                  onPress={() => setSecilenTarih(new Date(goruntulenen.yil, goruntulenen.ay, gun))}
+                />
+              ))}
+            </View>
+          ))}
+        </View>
+
+        {/* seçili gün özeti */}
+        <View style={styles.ozetKart}>
+          {planSay > 0 ? (
+            <Ring size={50} stroke={6} value={bitenSay} max={planSay} color={PRIMARY}>
+              <Text style={styles.ozetRingMetin}>
+                {bitenSay}
+                <Text style={styles.ozetRingPay}>/{planSay}</Text>
+              </Text>
+            </Ring>
+          ) : (
+            <View style={styles.ozetIkonKutu}>
+              <Ionicons name="calendar-outline" size={22} color={PRIMARY} />
+            </View>
+          )}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={styles.ozetBaslikSatir}>
+              <Text style={styles.ozetGun}>
+                {seciliGun} {AY_ADLARI[secilenTarih.getMonth()]}
+              </Text>
+              <Text style={styles.ozetGunAdi}>{GUN_ADLARI_TAM[secilenTarih.getDay()]}</Text>
+            </View>
+            <View style={styles.ozetMetaSatir}>
+              {ayniGunMu(secilenTarih, bugun) && (
+                <View style={styles.bugunRozet}>
+                  <Text style={styles.bugunRozetMetin}>Bugün</Text>
                 </View>
+              )}
+              {planSay > 0 ? (
+                <Text style={styles.ozetMeta}>
+                  {planSay} görev · {sureMetni(toplamDk)} planlı
+                </Text>
+              ) : (
+                <Text style={[styles.ozetMeta, { color: COLORS.textLight }]}>Plan yok</Text>
+              )}
+            </View>
+          </View>
+          {dersNoktalari.length > 0 && (
+            <View style={styles.ozetNoktalar}>
+              {dersNoktalari.map((r, i) => (
+                <View key={i} style={[styles.ozetNokta, { backgroundColor: r }]} />
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* ajanda */}
+        <View style={styles.ajanda}>
+          {yukleniyor && gunPlanlari.length === 0 && !seciliSinav ? (
+            <View style={styles.yukleniyor}>
+              <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : (
+            <>
+              {seciliSinav && <SinavKarti tur={seciliSinav} />}
+
+              {gunPlanlari.length === 0 && !seciliSinav && (
+                <View style={styles.bosHal}>
+                  <Text style={styles.bosHalMetin}>Bu güne planın yok.</Text>
+                  <Text style={styles.bosHalAlt}>Aşağıdan ekle ya da koçtan iste.</Text>
+                </View>
+              )}
+
+              {gunPlanlari.map((g) =>
+                g.tur === 'deneme' ? (
+                  <DenemeKarti key={g.id} gorev={g} onLongPress={() => silOnay(g)} />
+                ) : (
+                  <PlanKarti
+                    key={g.id}
+                    gorev={g}
+                    onPress={() => planAc(g)}
+                    onToggle={() => tamamlaToggle(g)}
+                    onLongPress={() => silOnay(g)}
+                  />
+                )
+              )}
+
+              <TouchableOpacity style={styles.planaEkle} onPress={() => setGorevModalAcik(true)} activeOpacity={0.8}>
+                <Ionicons name="add" size={17} color={PRIMARY} />
+                <Text style={styles.planaEkleMetin}>Plana ekle</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
 
-        <TouchableOpacity
-          onPress={() => haftaDegistir(7)}
-          style={styles.okButon}
-          activeOpacity={0.6}
-          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* ─── Task content ─── */}
-      {yukleniyor ? (
-        <View style={styles.yukleniyor}>
-          <ActivityIndicator size="large" color={PRIMARY} />
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.icerik} showsVerticalScrollIndicator={false}>
-          <BolumBasligi ikon="time-outline" renk={PRIMARY} baslik="Planlandı" />
-          {planlananGorevler.length === 0 ? (
-            <BosHal />
-          ) : (
-            planlananGorevler.map((gorev) => (
-              <GorevKarti
-                key={gorev.id}
-                gorev={gorev}
-                solRenk={PRIMARY}
-                onToggle={() => tamamlaToggle(gorev.id, gorev.tamamlandi)}
-                onLongPress={() => silOnay(gorev.id, gorev.baslik)}
-              />
-            ))
+              {/* İstediğin zaman (tarihe bağlı olmayan görevler) */}
+              {istediginZaman.length > 0 && (
+                <>
+                  <Text style={styles.altBaslik}>İSTEDİĞİN ZAMAN</Text>
+                  {istediginZaman.map((g) => (
+                    <PlanKarti
+                      key={g.id}
+                      gorev={g}
+                      saatGoster={false}
+                      onPress={() => planAc(g)}
+                      onToggle={() => tamamlaToggle(g)}
+                      onLongPress={() => silOnay(g)}
+                    />
+                  ))}
+                </>
+              )}
+            </>
           )}
+        </View>
+      </ScrollView>
 
-          <BolumBasligi ikon="checkmark-circle-outline" renk={TEAL} baslik="İstediğin Zaman" />
-          {istediginZamanGorevler.length === 0 ? (
-            <BosHal />
-          ) : (
-            istediginZamanGorevler.map((gorev) => (
-              <GorevKarti
-                key={gorev.id}
-                gorev={gorev}
-                solRenk={TEAL}
-                onToggle={() => tamamlaToggle(gorev.id, gorev.tamamlandi)}
-                onLongPress={() => silOnay(gorev.id, gorev.baslik)}
-              />
-            ))
-          )}
-          <View style={{ height: 32 }} />
-        </ScrollView>
-      )}
-
-      {/* ─── Monthly calendar modal ─── */}
-      <AyTakvimModal
-        visible={ayTakvimAcik}
-        secilenTarih={secilenTarih}
-        onSecim={(tarih) => {
-          setSecilenTarih(tarih);
-          setAyTakvimAcik(false);
-        }}
-        onKapat={() => setAyTakvimAcik(false)}
-      />
-
-      {/* ─── Add task modal ─── */}
+      {/* ─── Görev ekleme modalı ─── */}
       <Modal visible={gorevModalAcik} animationType="slide" transparent statusBarTranslucent>
         <Pressable style={styles.overlay} onPress={modalKapat} />
         <KeyboardAvoidingView
@@ -355,10 +477,34 @@ export default function Takvim() {
                   style={styles.input}
                   value={form.baslik}
                   onChangeText={(v) => setForm((f) => ({ ...f, baslik: v }))}
-                  placeholder="Matematik - Türev"
+                  placeholder="Çembersel hareket"
                   placeholderTextColor={COLORS.textLight}
                   returnKeyType="next"
                 />
+              </View>
+            </View>
+
+            <View style={styles.alan}>
+              <Text style={styles.alanEtiket}>Ders</Text>
+              <View style={styles.dersSatir}>
+                {DERSLER.map((d) => {
+                  const sec = form.ders === d;
+                  const renk = dersRenk(d);
+                  return (
+                    <TouchableOpacity
+                      key={d}
+                      style={[
+                        styles.dersChip,
+                        sec && { backgroundColor: renk + '1A', borderColor: renk },
+                      ]}
+                      onPress={() => setForm((f) => ({ ...f, ders: d }))}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.dersNokta, { backgroundColor: renk }]} />
+                      <Text style={[styles.dersChipMetin, sec && { color: renk }]}>{d}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
 
@@ -376,7 +522,7 @@ export default function Takvim() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.segmentButon, form.tip === 'anytime' && styles.segmentButonAktif]}
-                  onPress={() => setForm((f) => ({ ...f, tip: 'anytime' }))}
+                  onPress={() => setForm((f) => ({ ...f, tip: 'anytime', deneme: false }))}
                   activeOpacity={0.8}
                 >
                   <Text style={[styles.segmentMetin, form.tip === 'anytime' && styles.segmentMetinAktif]}>
@@ -387,53 +533,66 @@ export default function Takvim() {
             </View>
 
             {form.tip === 'planned' && (
-              <View style={styles.alan}>
-                <Text style={styles.alanEtiket}>Saat</Text>
+              <>
                 <TouchableOpacity
-                  style={styles.inputSarici}
-                  onPress={() => setSaatPickerAcik(true)}
+                  style={styles.denemeSatir}
+                  onPress={() => setForm((f) => ({ ...f, deneme: !f.deneme }))}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="time-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
-                  <Text style={[styles.input, { color: COLORS.text }]}>
-                    {form.saat.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                  <Ionicons name="chevron-down-outline" size={16} color={COLORS.textLight} />
+                  <View style={[styles.denemeKutu, form.deneme && styles.denemeKutuAktif]}>
+                    {form.deneme && <Ionicons name="checkmark" size={13} color="#fff" />}
+                  </View>
+                  <Text style={styles.denemeMetin}>Bu bir deneme sınavı</Text>
                 </TouchableOpacity>
 
-                {saatPickerAcik && Platform.OS === 'ios' && (
-                  <View style={styles.iosPickerSarici}>
+                <View style={styles.alan}>
+                  <Text style={styles.alanEtiket}>Saat</Text>
+                  <TouchableOpacity
+                    style={styles.inputSarici}
+                    onPress={() => setSaatPickerAcik(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="time-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
+                    <Text style={[styles.input, { color: COLORS.text }]}>
+                      {form.saat.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    <Ionicons name="chevron-down-outline" size={16} color={COLORS.textLight} />
+                  </TouchableOpacity>
+
+                  {saatPickerAcik && Platform.OS === 'ios' && (
+                    <View style={styles.iosPickerSarici}>
+                      <DateTimePicker
+                        value={form.saat}
+                        mode="time"
+                        display="spinner"
+                        onChange={(_: DateTimePickerEvent, d?: Date) => {
+                          if (d) setForm((f) => ({ ...f, saat: d }));
+                        }}
+                        locale="tr-TR"
+                        themeVariant="light"
+                      />
+                      <TouchableOpacity
+                        style={styles.iosPickerTamam}
+                        onPress={() => setSaatPickerAcik(false)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.iosPickerTamamMetin}>Tamam</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {saatPickerAcik && Platform.OS === 'android' && (
                     <DateTimePicker
                       value={form.saat}
                       mode="time"
-                      display="spinner"
+                      display="default"
                       onChange={(_: DateTimePickerEvent, d?: Date) => {
+                        setSaatPickerAcik(false);
                         if (d) setForm((f) => ({ ...f, saat: d }));
                       }}
-                      locale="tr-TR"
-                      themeVariant="light"
                     />
-                    <TouchableOpacity
-                      style={styles.iosPickerTamam}
-                      onPress={() => setSaatPickerAcik(false)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.iosPickerTamamMetin}>Tamam</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                {saatPickerAcik && Platform.OS === 'android' && (
-                  <DateTimePicker
-                    value={form.saat}
-                    mode="time"
-                    display="default"
-                    onChange={(_: DateTimePickerEvent, d?: Date) => {
-                      setSaatPickerAcik(false);
-                      if (d) setForm((f) => ({ ...f, saat: d }));
-                    }}
-                  />
-                )}
-              </View>
+                  )}
+                </View>
+              </>
             )}
 
             <View style={styles.alan}>
@@ -476,281 +635,177 @@ export default function Takvim() {
   );
 }
 
-// ─── Monthly calendar modal ───────────────────
+// ─── Izgara hücresi ───────────────────────────
 
-function AyTakvimModal({
-  visible,
-  secilenTarih,
-  onSecim,
-  onKapat,
+function GunHucresi({
+  gun,
+  bugunMu,
+  secili,
+  sinav,
+  deneme,
+  noktalar,
+  onPress,
 }: {
-  visible: boolean;
-  secilenTarih: Date;
-  onSecim: (tarih: Date) => void;
-  onKapat: () => void;
+  gun: number;
+  bugunMu: boolean;
+  secili: boolean;
+  sinav: 'tyt' | 'ayt' | null;
+  deneme: boolean;
+  noktalar: string[];
+  onPress: () => void;
 }) {
-  const [ayYil, setAyYil] = useState({
-    ay: secilenTarih.getMonth(),
-    yil: secilenTarih.getFullYear(),
-  });
+  if (gun === 0) return <View style={styles.bosHucre} />;
 
-  useEffect(() => {
-    if (visible) {
-      setAyYil({ ay: secilenTarih.getMonth(), yil: secilenTarih.getFullYear() });
-    }
-  }, [visible, secilenTarih]);
-
-  function ayDegistir(delta: number) {
-    setAyYil((prev) => {
-      let ay = prev.ay + delta;
-      let yil = prev.yil;
-      if (ay < 0) { ay = 11; yil--; }
-      if (ay > 11) { ay = 0; yil++; }
-      return { ay, yil };
-    });
-  }
-
-  const ilkGun = new Date(ayYil.yil, ayYil.ay, 1);
-  const gridBaslangic = new Date(ilkGun);
-  gridBaslangic.setDate(1 - pazartesiBaslangicGunIndeksi(ilkGun.getDay()));
-
-  const gunler = Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(gridBaslangic);
-    d.setDate(gridBaslangic.getDate() + i);
-    return d;
-  });
-
-  const bugun = new Date();
-
-  // Split into 6 rows of 7
-  const haftalar = Array.from({ length: 6 }, (_, h) => gunler.slice(h * 7, h * 7 + 7));
+  const beyazMetin = !!sinav || bugunMu;
+  const cemberStil = [
+    styles.gunDaire,
+    secili && !sinav && !bugunMu && styles.seciliDaire,
+    bugunMu && !sinav && styles.bugunDaire,
+    deneme && !sinav && !bugunMu && !secili && styles.denemeDaire,
+  ];
+  const metinStil = [
+    styles.gunSayi,
+    secili && !sinav && !bugunMu && { color: PRIMARY, fontWeight: '800' as const },
+    beyazMetin && { color: '#fff', fontWeight: '800' as const },
+    deneme && !sinav && !bugunMu && !secili && { color: COLORS.accent, fontWeight: '700' as const },
+  ];
 
   return (
-    <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
-      <Pressable style={ayStyles.overlay} onPress={onKapat}>
-        {/* onStartShouldSetResponder stops touches on the card from bubbling up to the Pressable */}
-        <View style={ayStyles.kart} onStartShouldSetResponder={() => true}>
-          {/* Month navigation */}
-          <View style={ayStyles.ayBaslik}>
-            <TouchableOpacity onPress={() => ayDegistir(-1)} hitSlop={8} activeOpacity={0.7}>
-              <Ionicons name="chevron-back" size={20} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-            <Text style={ayStyles.ayAdi}>
-              {AY_ADLARI[ayYil.ay]} {ayYil.yil}
-            </Text>
-            <TouchableOpacity onPress={() => ayDegistir(1)} hitSlop={8} activeOpacity={0.7}>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-            </TouchableOpacity>
+    <TouchableOpacity style={styles.hucre} onPress={onPress} activeOpacity={0.7}>
+      {sinav ? (
+        <LinearGradient
+          colors={[COLORS.primary, COLORS.accent]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.gunDaire, styles.sinavDaire]}
+        >
+          <Text style={[styles.gunSayi, { color: '#fff', fontWeight: '800' }]}>{gun}</Text>
+          <View style={styles.sinavBayrak}>
+            <Ionicons name="flag" size={8} color={COLORS.accent} />
           </View>
+        </LinearGradient>
+      ) : (
+        <View style={cemberStil}>
+          <Text style={metinStil}>{gun}</Text>
+        </View>
+      )}
 
-          {/* Day-of-week headers */}
-          <View style={ayStyles.gunBasliklari}>
-            {GUN_KISALTMALARI.map((k) => (
-              <Text key={k} style={ayStyles.gunBaslik}>{k}</Text>
-            ))}
-          </View>
-
-          {/* Grid */}
-          {haftalar.map((hafta, hi) => (
-            <View key={hi} style={ayStyles.haftaSatiri}>
-              {hafta.map((gun, gi) => {
-                const buAy = gun.getMonth() === ayYil.ay;
-                const secili = ayniGunMu(gun, secilenTarih);
-                const bugunMu = ayniGunMu(gun, bugun);
-                return (
-                  <TouchableOpacity
-                    key={gi}
-                    style={ayStyles.gunHucre}
-                    onPress={() => onSecim(gun)}
-                    activeOpacity={0.7}
-                  >
-                    <View
-                      style={[
-                        ayStyles.gunHucreDaire,
-                        secili && { backgroundColor: PRIMARY },
-                        bugunMu && !secili && { borderWidth: 1.5, borderColor: PRIMARY },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          ayStyles.gunSayi,
-                          !buAy && ayStyles.digerAyMetin,
-                          secili && ayStyles.seciliMetin,
-                          bugunMu && !secili && { color: PRIMARY, fontWeight: '700' },
-                        ]}
-                      >
-                        {gun.getDate()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+      <View style={styles.noktaSatir}>
+        {!sinav && !deneme &&
+          noktalar.map((r, i) => (
+            <View
+              key={i}
+              style={[styles.gunNokta, { backgroundColor: bugunMu ? '#fff' : r, opacity: bugunMu ? 0.92 : 1 }]}
+            />
           ))}
-        </View>
-      </Pressable>
-    </Modal>
-  );
-}
-
-// ─── Sub-components ───────────────────────────
-
-function BolumBasligi({
-  ikon,
-  renk,
-  baslik,
-}: {
-  ikon: React.ComponentProps<typeof Ionicons>['name'];
-  renk: string;
-  baslik: string;
-}) {
-  return (
-    <View style={bolumStyles.satir}>
-      <Ionicons name={ikon} size={14} color={renk} />
-      <Text style={[bolumStyles.baslik, { color: renk }]}>{baslik}</Text>
-    </View>
-  );
-}
-
-const bolumStyles = StyleSheet.create({
-  satir: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 20,
-    marginBottom: 8,
-    paddingHorizontal: 20,
-  },
-  baslik: { fontSize: 12, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase' },
-});
-
-function BosHal() {
-  return (
-    <View style={bosStyles.sarici}>
-      <Ionicons name="calendar-outline" size={18} color={COLORS.textLight} />
-      <Text style={bosStyles.metin}>Henüz görev yok</Text>
-    </View>
-  );
-}
-
-const bosStyles = StyleSheet.create({
-  sarici: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 10 },
-  metin: { fontSize: 13, color: COLORS.textLight },
-});
-
-function GorevKarti({
-  gorev,
-  solRenk,
-  onToggle,
-  onLongPress,
-}: {
-  gorev: Gorev;
-  solRenk: string;
-  onToggle: () => void;
-  onLongPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={kartStyles.kart}
-      onLongPress={onLongPress}
-      activeOpacity={0.85}
-      delayLongPress={500}
-    >
-      <View style={[kartStyles.solSinir, { backgroundColor: solRenk }]} />
-      <View style={kartStyles.icerik}>
-        <Text style={[kartStyles.baslik, gorev.tamamlandi && kartStyles.tamamlandiMetin]} numberOfLines={2}>
-          {gorev.baslik}
-        </Text>
-        <View style={kartStyles.rozet}>
-          <Text style={kartStyles.rozetMetin}>{gorev.sure} dk</Text>
-        </View>
+        {deneme && !sinav && <Text style={styles.denemeEtiket}>DENEME</Text>}
       </View>
-      <TouchableOpacity onPress={onToggle} hitSlop={8} style={kartStyles.checkSarici} activeOpacity={0.7}>
-        <View style={[kartStyles.checkbox, gorev.tamamlandi && { backgroundColor: solRenk, borderColor: solRenk }]}>
-          {gorev.tamamlandi && <Ionicons name="checkmark" size={13} color="#fff" />}
-        </View>
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
 
-const kartStyles = StyleSheet.create({
-  kart: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    marginHorizontal: 20,
-    marginBottom: 8,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  solSinir: { width: 4 },
-  icerik: { flex: 1, paddingHorizontal: 12, paddingVertical: 14, gap: 6 },
-  baslik: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-  tamamlandiMetin: { textDecorationLine: 'line-through', color: COLORS.textLight },
-  rozet: {
-    alignSelf: 'flex-start',
-    backgroundColor: COLORS.cardBorder,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  rozetMetin: { fontSize: 12, color: COLORS.textSecondary },
-  checkSarici: { justifyContent: 'center', paddingRight: 14 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: COLORS.cardBorder,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+// ─── Ajanda kartları ──────────────────────────
 
-// ─── Monthly calendar styles ──────────────────
+function PlanKarti({
+  gorev,
+  saatGoster = true,
+  onPress,
+  onToggle,
+  onLongPress,
+}: {
+  gorev: Gorev;
+  saatGoster?: boolean;
+  onPress: () => void;
+  onToggle: () => void;
+  onLongPress: () => void;
+}) {
+  const renk = dersRenk(gorev.ders);
+  const bas = saatFormatla(gorev.tarih);
+  const done = gorev.tamamlandi;
 
-const ayStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  kart: {
-    width: '100%',
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  ayBaslik: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  ayAdi: { fontSize: 16, fontWeight: '700', color: COLORS.text },
-  gunBasliklari: { flexDirection: 'row', marginBottom: 6 },
-  gunBaslik: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', color: COLORS.textLight },
-  haftaSatiri: { flexDirection: 'row' },
-  gunHucre: { flex: 1, aspectRatio: 1, justifyContent: 'center', alignItems: 'center' },
-  gunHucreDaire: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-  gunSayi: { fontSize: 13, color: COLORS.text },
-  digerAyMetin: { color: COLORS.textLight },
-  seciliMetin: { color: '#fff', fontWeight: '700' },
-});
+  return (
+    <TouchableOpacity
+      style={planStyles.kart}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={450}
+      activeOpacity={0.85}
+    >
+      <View style={[planStyles.solSerit, { backgroundColor: renk }]} />
+      <View style={planStyles.icerik}>
+        {saatGoster && !!bas && (
+          <View style={planStyles.saatKutu}>
+            <Text style={planStyles.saat}>{bas}</Text>
+            <Text style={planStyles.saatSure}>{gorev.sure} dk</Text>
+          </View>
+        )}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={planStyles.dersSatir}>
+            <View style={[planStyles.dersNokta, { backgroundColor: renk }]} />
+            <Text style={[planStyles.dersEtiket, { color: renk }]} numberOfLines={1}>
+              {gorev.ders ?? 'Genel'}
+            </Text>
+          </View>
+          <Text style={[planStyles.konu, done && planStyles.konuDone]} numberOfLines={2}>
+            {gorev.baslik}
+          </Text>
+          {!!gorev.adimlar?.length && (
+            <Text style={planStyles.adimMeta}>
+              {gorev.adimlar.filter((a) => a.done).length}/{gorev.adimlar.length} adım
+            </Text>
+          )}
+        </View>
+        <TouchableOpacity onPress={onToggle} hitSlop={8} activeOpacity={0.7}>
+          <View style={[planStyles.check, done && { backgroundColor: COLORS.success, borderColor: COLORS.success }]}>
+            {done && <Ionicons name="checkmark" size={14} color="#fff" />}
+          </View>
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
-// ─── Main styles ──────────────────────────────
+function DenemeKarti({ gorev, onLongPress }: { gorev: Gorev; onLongPress: () => void }) {
+  const bas = saatFormatla(gorev.tarih);
+  return (
+    <TouchableOpacity style={denemeStyles.kart} onLongPress={onLongPress} delayLongPress={450} activeOpacity={0.85}>
+      <View style={denemeStyles.ikonKutu}>
+        <Ionicons name="trophy" size={20} color={COLORS.accent} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={denemeStyles.ad} numberOfLines={1}>{gorev.baslik}</Text>
+        <Text style={denemeStyles.meta}>
+          {bas ? `${bas} · ` : ''}{sureMetni(gorev.sure)}
+        </Text>
+      </View>
+      <View style={denemeStyles.rozet}>
+        <Text style={denemeStyles.rozetMetin}>Deneme</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function SinavKarti({ tur }: { tur: 'tyt' | 'ayt' }) {
+  const ad = tur === 'tyt' ? 'YKS · 1. Oturum (TYT)' : 'YKS · 2. Oturum (AYT)';
+  return (
+    <LinearGradient
+      colors={[COLORS.primary, COLORS.accent]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={sinavStyles.kart}
+    >
+      <View style={sinavStyles.ikonKutu}>
+        <Ionicons name="flag" size={20} color="#fff" />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={sinavStyles.ad}>{ad}</Text>
+        <Text style={sinavStyles.meta}>Sınav günü · başarılar! 🎯</Text>
+      </View>
+    </LinearGradient>
+  );
+}
+
+// ─── Stiller ──────────────────────────────────
 
 const styles = StyleSheet.create({
   ekran: { flex: 1, backgroundColor: COLORS.background },
@@ -759,74 +814,171 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingTop: 56,
-    paddingBottom: 12,
-    backgroundColor: COLORS.background,
-  },
-  headerSol: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerOrta: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-
-  bugunButon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: PRIMARY,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  bugunMetin: { fontSize: 12, fontWeight: '600', color: PRIMARY },
-  ikonButon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: PRIMARY,
-  },
-
-  gunAdi: { fontSize: 18, fontWeight: '700', color: COLORS.text },
-  tarihDetay: { fontSize: 12, color: COLORS.textSecondary, marginTop: 1 },
-
-  fabButon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: PRIMARY,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  haftaSeritSarici: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingBottom: 13,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBorder,
   },
-  okButon: { paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' },
-  gunlerSatir: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
-  gunButon: { alignItems: 'center', paddingVertical: 2 },
-  gunKisaltma: { fontSize: 11, fontWeight: '500', color: COLORS.textLight, marginBottom: 4 },
-  seciliGunMetin: { color: PRIMARY },
-  gunDaire: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-  seciliGunDaire: { backgroundColor: PRIMARY },
-  bugunDaire: { borderWidth: 1.5, borderColor: PRIMARY },
-  gunSayi: { fontSize: 14, fontWeight: '500', color: COLORS.text },
-  seciliGunSayiMetin: { color: '#fff', fontWeight: '700' },
-  bugunSayiMetin: { color: PRIMARY, fontWeight: '700' },
+  ayNav: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  navBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ayBaslik: { fontSize: 19, fontWeight: '800', color: COLORS.text, minWidth: 118, textAlign: 'center' },
+  ayYil: { color: COLORS.textLight, fontWeight: '700' },
+  geriSayimPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 99,
+  },
+  geriSayimMetin: { fontSize: 12.5, fontWeight: '800', color: '#fff' },
 
-  yukleniyor: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  icerik: { paddingBottom: 32 },
+  gunBasliklari: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 6 },
+  gunBaslik: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: COLORS.textLight,
+  },
+
+  izgara: { paddingHorizontal: 8, paddingBottom: 8 },
+  haftaSatiri: { flexDirection: 'row' },
+  hucre: { flex: 1, alignItems: 'center', paddingVertical: 4, gap: 4 },
+  bosHucre: { flex: 1 },
+  gunDaire: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  sinavDaire: {
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  sinavBayrak: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 15,
+    height: 15,
+    borderRadius: 99,
+    backgroundColor: COLORS.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  bugunDaire: {
+    backgroundColor: PRIMARY,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  seciliDaire: { backgroundColor: COLORS.primaryLight, borderColor: PRIMARY },
+  denemeDaire: { backgroundColor: COLORS.card, borderColor: COLORS.accent },
+  gunSayi: { fontSize: 15, fontWeight: '600', color: COLORS.text },
+
+  noktaSatir: { flexDirection: 'row', gap: 3, height: 8, alignItems: 'center' },
+  gunNokta: { width: 5, height: 5, borderRadius: 99 },
+  denemeEtiket: { fontSize: 8, fontWeight: '800', letterSpacing: 0.3, color: COLORS.accent },
+
+  ozetKart: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 2,
+  },
+  ozetRingMetin: { fontSize: 13, fontWeight: '800', color: COLORS.text },
+  ozetRingPay: { color: COLORS.textLight, fontWeight: '700' },
+  ozetIkonKutu: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ozetBaslikSatir: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  ozetGun: { fontSize: 20, fontWeight: '800', color: COLORS.text, letterSpacing: -0.4 },
+  ozetGunAdi: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  ozetMetaSatir: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
+  ozetMeta: { fontSize: 12.5, fontWeight: '600', color: COLORS.textSecondary },
+  bugunRozet: { backgroundColor: COLORS.primaryLight, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 },
+  bugunRozetMetin: { fontSize: 11, fontWeight: '800', color: PRIMARY },
+  ozetNoktalar: { flexDirection: 'row', gap: 4 },
+  ozetNokta: { width: 7, height: 7, borderRadius: 99 },
+
+  ajanda: { paddingHorizontal: 16, paddingTop: 12, gap: 9 },
+  yukleniyor: { paddingVertical: 30, alignItems: 'center' },
+  bosHal: {
+    paddingVertical: 24,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    borderRadius: 16,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.cardBorder,
+  },
+  bosHalMetin: { fontSize: 13.5, fontWeight: '700', color: COLORS.textSecondary },
+  bosHalAlt: { fontSize: 12.5, fontWeight: '600', color: COLORS.textLight, marginTop: 3 },
+  planaEkle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: COLORS.primary + '55',
+    backgroundColor: COLORS.primaryLight + '70',
+    marginTop: 2,
+  },
+  planaEkleMetin: { fontSize: 13.5, fontWeight: '700', color: PRIMARY },
+  altBaslik: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    color: COLORS.textLight,
+    marginTop: 14,
+    marginBottom: 2,
+    paddingHorizontal: 2,
+  },
 
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet: {
@@ -835,7 +987,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 20,
     paddingBottom: 36,
-    maxHeight: '85%',
+    maxHeight: '88%',
   },
   sheetTutamac: {
     width: 36,
@@ -861,6 +1013,34 @@ const styles = StyleSheet.create({
   },
   inputIkon: { marginRight: 8 },
   input: { flex: 1, fontSize: 15, color: COLORS.text },
+
+  dersSatir: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  dersChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 99,
+    borderWidth: 1.5,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.background,
+  },
+  dersNokta: { width: 8, height: 8, borderRadius: 99 },
+  dersChipMetin: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+
+  denemeSatir: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  denemeKutu: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: COLORS.cardBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  denemeKutuAktif: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  denemeMetin: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
   segmentSarici: {
     flexDirection: 'row',
@@ -914,4 +1094,85 @@ const styles = StyleSheet.create({
     backgroundColor: PRIMARY,
   },
   kaydetMetin: { fontSize: 15, fontWeight: '600', color: '#fff' },
+});
+
+const planStyles = StyleSheet.create({
+  kart: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    overflow: 'hidden',
+  },
+  solSerit: { width: 4 },
+  icerik: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  saatKutu: { width: 46 },
+  saat: { fontSize: 13, fontWeight: '800', color: COLORS.text },
+  saatSure: { fontSize: 11, fontWeight: '600', color: COLORS.textLight },
+  dersSatir: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 },
+  dersNokta: { width: 7, height: 7, borderRadius: 99 },
+  dersEtiket: { fontSize: 11.5, fontWeight: '700' },
+  konu: { fontSize: 13.5, fontWeight: '600', color: COLORS.text },
+  konuDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
+  adimMeta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight, marginTop: 3 },
+  check: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: COLORS.cardBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
+const denemeStyles = StyleSheet.create({
+  kart: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.card,
+    borderWidth: 1.5,
+    borderColor: COLORS.accent + '55',
+  },
+  ikonKutu: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: COLORS.accent + '1A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ad: { fontSize: 14.5, fontWeight: '800', color: COLORS.text },
+  meta: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
+  rozet: { backgroundColor: COLORS.accent + '14', borderRadius: 99, paddingHorizontal: 12, paddingVertical: 7 },
+  rozetMetin: { fontSize: 12.5, fontWeight: '800', color: COLORS.accent },
+});
+
+const sinavStyles = StyleSheet.create({
+  kart: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.28,
+    shadowRadius: 26,
+    elevation: 6,
+  },
+  ikonKutu: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ad: { fontSize: 14.5, fontWeight: '800', color: '#fff' },
+  meta: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.85)', marginTop: 2 },
 });

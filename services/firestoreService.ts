@@ -150,26 +150,52 @@ export const checkAndRetrySyncIfNeeded = async (
 // ─────────────────────────────────────────────
 
 export type GorevTip = 'planned' | 'anytime';
+// Görevin türü: normal çalışma planı ya da deneme sınavı.
+export type GorevTur = 'plan' | 'deneme';
+// Plan adımının türü: okuma/tekrar adımı ya da soru çözme adımı.
+export type AdimTip = 'oku' | 'soru';
+
+// Bir planın içindeki küçük çalışma adımı (kendi süresi ve sayacı olur).
+export interface Adim {
+  tip: AdimTip;
+  ad: string;
+  dk: number; // adıma ayrılan süre (dakika)
+  done: boolean;
+  soru?: number; // yalnızca tip === 'soru' ise: soru sayısı
+}
 
 export interface Gorev {
   id: string;
   baslik: string;
+  ders?: string; // ders (renk/etiket için): Matematik, Fizik, ...
+  tur?: GorevTur; // plan | deneme (varsayılan: plan)
   sure: number; // minutes
   tip: GorevTip;
   tarih: Timestamp | null; // only set when tip === 'planned'
   tamamlandi: boolean;
   olusturmaTarihi: Timestamp;
+  adimlar?: Adim[]; // plan adımları (adım sayaçlı çalışma akışı)
+}
+
+// Firestore, `undefined` alanları reddeder; yazmadan önce ayıkla.
+function temizle<T extends Record<string, unknown>>(obj: T): T {
+  const cikti = {} as T;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (cikti as Record<string, unknown>)[k] = v;
+  }
+  return cikti;
 }
 
 export const gorevEkle = async (
   uid: string,
   gorev: Omit<Gorev, 'id' | 'olusturmaTarihi'>
-): Promise<void> => {
+): Promise<string> => {
   const kolRef = collection(db, 'users', uid, 'gorevler');
-  await addDoc(kolRef, {
-    ...gorev,
+  const ref = await addDoc(kolRef, {
+    ...temizle(gorev),
     olusturmaTarihi: Timestamp.now(),
   });
+  return ref.id;
 };
 
 /**
@@ -221,6 +247,46 @@ export const gunGorevleriniGetir = async (
   return { planned, anytime };
 };
 
+/**
+ * Bir takvim ayındaki tüm planlanmış görevleri getirir (ızgara noktaları +
+ * gün ajandası için). `ay` 0-tabanlıdır (0 = Ocak).
+ *
+ * Composite index gerekir: tip ASC, tarih ASC (planned sorgusuyla aynı).
+ */
+export const ayGorevleriniGetir = async (
+  uid: string,
+  yil: number,
+  ay: number
+): Promise<Gorev[]> => {
+  const kolRef = collection(db, 'users', uid, 'gorevler');
+
+  const ayBaslangic = new Date(yil, ay, 1, 0, 0, 0, 0);
+  const aySonu = new Date(yil, ay + 1, 0, 23, 59, 59, 999);
+
+  const ayQuery = query(
+    kolRef,
+    where('tip', '==', 'planned'),
+    where('tarih', '>=', Timestamp.fromDate(ayBaslangic)),
+    where('tarih', '<=', Timestamp.fromDate(aySonu)),
+    orderBy('tarih', 'asc')
+  );
+
+  const snap = await getDocs(ayQuery);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+};
+
+export const gorevGetir = async (
+  uid: string,
+  gorevId: string
+): Promise<Gorev | null> => {
+  const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
+  const snap = await getDoc(gorevRef);
+  if (!snap.exists()) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { id: snap.id, ...(snap.data() as any) };
+};
+
 export const gorevTamamla = async (
   uid: string,
   gorevId: string,
@@ -228,6 +294,18 @@ export const gorevTamamla = async (
 ): Promise<void> => {
   const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
   await updateDoc(gorevRef, { tamamlandi });
+};
+
+// Plan adımlarını (ve istenirse toplam süreyi) Firestore'a yazar.
+export const adimlariGuncelle = async (
+  uid: string,
+  gorevId: string,
+  adimlar: Adim[]
+): Promise<void> => {
+  const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
+  const sure = adimlar.reduce((t, a) => t + (a.dk || 0), 0);
+  const tumuBitti = adimlar.length > 0 && adimlar.every((a) => a.done);
+  await updateDoc(gorevRef, { adimlar, sure, tamamlandi: tumuBitti });
 };
 
 export const gorevSil = async (uid: string, gorevId: string): Promise<void> => {
