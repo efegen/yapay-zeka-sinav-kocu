@@ -1,0 +1,14 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Kullanıcı yalnızca kendi verisine (profil + tüm alt koleksiyonları:
+    // gorevler, koc/hafiza, vb.) erişebilir. {document=**} özyinelemeli joker
+    // olduğu için ileride eklenen alt koleksiyonlar da otomatik kapsanır.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+  }
+}
