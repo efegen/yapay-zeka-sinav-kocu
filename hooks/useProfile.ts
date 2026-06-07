@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebaseConfig';
 
@@ -24,23 +25,40 @@ export function useProfile() {
   const [yukleniyor, setYukleniyor] = useState(true);
 
   useEffect(() => {
-    const kullanici = auth.currentUser;
-    if (!kullanici) { setYukleniyor(false); return; }
+    // Auth restorasyonu (özellikle web'de) asenkrondur: mount anında auth.currentUser
+    // henüz null olabilir. Eskiden burada tek seferlik kontrol edilip çıkılıyordu; bu
+    // durumda profil HİÇ yüklenmiyordu (koç "seni tanımıyorum" diyordu). Artık auth
+    // durumunu dinleyip kullanıcı hazır olunca (ve değiştikçe) profile abone oluyoruz.
+    let profilUnsub: (() => void) | undefined;
 
-    const unsub = onSnapshot(
-      doc(db, 'users', kullanici.uid),
-      (snap) => {
-        if (snap.exists()) setProfil(snap.data() as Profil);
-        else setProfil(null);
+    const authUnsub = onAuthStateChanged(auth, (kullanici) => {
+      profilUnsub?.();
+      profilUnsub = undefined;
+
+      if (!kullanici) {
+        setProfil(null);
         setYukleniyor(false);
-      },
-      (error) => {
-        console.error('[useProfile] onSnapshot hatası:', error);
-        setYukleniyor(false);
+        return;
       }
-    );
 
-    return unsub;
+      setYukleniyor(true);
+      profilUnsub = onSnapshot(
+        doc(db, 'users', kullanici.uid),
+        (snap) => {
+          setProfil(snap.exists() ? (snap.data() as Profil) : null);
+          setYukleniyor(false);
+        },
+        (error) => {
+          console.error('[useProfile] onSnapshot hatası:', error);
+          setYukleniyor(false);
+        }
+      );
+    });
+
+    return () => {
+      authUnsub();
+      profilUnsub?.();
+    };
   }, []);
 
   return { profil, yukleniyor };

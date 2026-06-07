@@ -11,7 +11,9 @@ compatibility_date = "2025-01-01"
 # Yerelde (`wrangler dev`) override etmek istersen worker/.dev.vars kullan.
 [vars]
 # AI Koç sohbeti (kart JSON üretimi)
-CHAT_MODEL = "gpt-5-mini"
+# reasoning OLMAYAN model: sohbet reasoning gerektirmez ve gpt-5* reasoning tokenı bütçeyi
+# yiyip "token sınırı" boş yanıtına yol açıyordu. gpt-4.1-mini hem güvenli hem ücretsiz kuyrukta bol.
+CHAT_MODEL = "gpt-4.1-mini"
 # Soru fotoğrafı çözümü — önce ucuz bir model zorluğu sınıflandırır, sonra ona göre çözücü seçilir:
 VISION_MODEL_TRIAGE = "gpt-4.1-mini"   # zorluk/okunabilirlik triyajı (ucuz, hızlı)
 VISION_MODEL_KOLAY  = "gpt-4.1"        # basit sorular (hızlı)

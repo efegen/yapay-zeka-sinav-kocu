@@ -20,7 +20,12 @@ export interface Env {
 }
 
 // Env tanımlı değilse kullanılacak makul varsayılanlar.
-const VARSAYILAN_CHAT_MODEL = 'gpt-5-mini';
+// NOT: Sohbet için bilerek reasoning OLMAYAN bir model (gpt-4.1-mini) seçilir.
+// Reasoning modelleri (gpt-5*) görünür cevaptan önce dahili "düşünme" tokenı harcar ve bu
+// max_completion_tokens bütçesinden düşülür; düşük tavanda bütçe reasoning'e gidip içerik
+// boş döner (finish_reason='length') → kullanıcı "token sınırı" hatası görür. Plan/motivasyon
+// gibi sohbet işleri reasoning gerektirmez, bu yüzden gpt-4.1-mini hem güvenli hem ucuz.
+const VARSAYILAN_CHAT_MODEL = 'gpt-4.1-mini';
 const VARSAYILAN_TRIAGE = 'gpt-4.1-mini';
 const VARSAYILAN_KOLAY = 'gpt-4.1';
 const VARSAYILAN_ORTA = 'gpt-5-mini';
@@ -129,6 +134,9 @@ function sistemPromptu(b: OgrenciBaglam): string {
     '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
     '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
     '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
+    '- Öğrenci bir çözümü/konuyu anlamadığını söylerse tüm çözümü baştan DÖKME. Hangi ADIMI/kavramı anlamadığını',
+    '  AÇIKÇA belirtmişse (örn. "X adımını anlamadım") tekrar "hangi adım?" diye SORMA; doğrudan YALNIZCA o adımı',
+    '  sade, kısa ve NEDEN-li (neden bu işlem yapıldı) açıkla. Belirtmemişse önce kısaca nerede takıldığını sor.',
     '',
     KART_REHBERI,
   ].join('\n');
@@ -168,7 +176,7 @@ const KART_REHBERI = [
   '- pomodoroPlani: { baslik, ozet, bloklar:[{sure,ders,tip:"odak"|"mola",renk?}], cta?:{etiket,aksiyon:"pomodoro"} }',
   '- konuAdimlari: { konu, adimlar:[metin], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] }',
   '- miniDenemeAnalizi: { baslik, dersler:[{ad,net,max,renk}], icgoru }',
-  '- cozumAdimlari: { soru, adimlar:[{ad,detay}], sonuc, acikAdim? }',
+  '- cozumAdimlari: { giris, adimlar:[{ad,detay}], sonuc, acikAdim? } (giris=kısa çözüm girişi, soruyu tekrarlama)',
   '- ipucu: { baslik, metin }',
   '- momentum: { baslik, altBaslik?, metrikler:[{deger,etiket,icon,renk}], not? }',
   '- molaRecetesi: { baslik, altBaslik?, ogeler:[{icon,metin}], cta?:{etiket,aksiyon:"pomodoro"} }',
@@ -201,12 +209,14 @@ const SORU_PROMPT = [
   '  "ders": "AYT Matematik" gibi,',
   '  "konu": "Limit" gibi,',
   '  "kartlar": [',
-  '    { "tip": "cozumAdimlari", "veri": { "soru": "okunur soru ifadesi", "adimlar": [{ "ad": "Adım başlığı", "detay": "açıklama/işlem" }], "sonuc": "kısa nihai cevap", "acikAdim": 0 } },',
+  '    { "tip": "cozumAdimlari", "veri": { "giris": "çözüme 1 cümlelik giriş/yaklaşım", "adimlar": [{ "ad": "Adım başlığı", "detay": "açıklama/işlem" }], "sonuc": "kısa nihai cevap", "acikAdim": 0 } },',
   '    { "tip": "ipucu", "veri": { "baslik": "Ezber ipucu", "metin": "kısa püf nokta" } }',
   '  ]',
   '}',
   '',
   'KURALLAR:',
+  '- Soruyu ve ŞIKLARI çözümde TEKRARLAMA (öğrenci zaten fotoğrafı sağladı). "giris" alanında soruyu',
+  '  yeniden yazma; bunun yerine çözüme kısa bir giriş/yaklaşım cümlesi yaz (örn. "Zincir kuralıyla çözelim").',
   '- Görseldeki soruyu net OKUYAMIYORSAN (bulanık, karanlık, kesik): durum="bulanik", kartlar=[], yanit kısa açıklama.',
   '- Görselde bir SORU YOKSA (alakasız fotoğraf): durum="alakasiz", kartlar=[], yanit kısa açıklama.',
   '- Soru okunuyorsa: durum="cozuldu". Adım sayısını soruya göre AYARLA — basit soruda 1-2 kısa adım yeter,',
@@ -221,7 +231,7 @@ const SORU_PROMPT = [
   '- Tüm matematiksel ifadeleri LaTeX ile yaz. Satır içi: $...$, ayrı satır/blok: $$...$$.',
   '- Kesirleri \\frac{pay}{payda} ile yaz: düz "a/b" YAZMA. Örn: $$\\frac{x^2+y^3}{x-y}$$.',
   '- Üs $x^2$, kök $\\sqrt{x}$, türev $\\frac{d}{dx}x^2 = 2x$, limit $\\lim_{x\\to 2}$, integral $\\int$.',
-  '- "soru", "adimlar[].detay", "ipucu.metin" ve "sonuc" alanlarında bu kurala uy. Açıklama metnini ($ dışında) Türkçe düz yaz.',
+  '- "giris", "adimlar[].detay", "ipucu.metin" ve "sonuc" alanlarında bu kurala uy. Açıklama metnini ($ dışında) Türkçe düz yaz.',
   '- HER LaTeX komutu (\\frac, \\sqrt, ^, _, \\pi ...) MUTLAKA $...$ içinde olsun; ASLA $ dışında çıplak bırakma.',
   '- ŞIKLARI da sar: her şıktaki matematik ayrı ayrı $...$ içinde. Örn: (A) $1$ (B) $2$ (C) $3$ (D) $\\frac{1}{3}$ (E) $\\frac{2}{3}$.',
   '- Örnek detay: "Değerleri yerine koyalım: $$\\frac{2^2+(-1)^3}{2-(-1)} = \\frac{4-1}{3} = 1$$".',
@@ -278,7 +288,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   // Model env'den gelir (wrangler.toml [vars] / .dev.vars). Kod değişmeden değiştirilebilir.
   const model = env.CHAT_MODEL || VARSAYILAN_CHAT_MODEL;
 
-  const oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 900 });
+  const oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 1500 });
   if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
 
   const cikti = jsonAyristir(oa.ham!);
@@ -302,11 +312,25 @@ function gorselMesaji(dataUrl: string, metin: string) {
   };
 }
 
-/** Zorluğa göre çözücü model + token tavanı (env'den, varsayılanlarla). */
-function cozucuSec(env: Env, zorluk?: string): { model: string; tavan: number } {
-  if (zorluk === 'zor') return { model: env.VISION_MODEL_ZOR || VARSAYILAN_ZOR, tavan: 6000 };
-  if (zorluk === 'kolay') return { model: env.VISION_MODEL_KOLAY || VARSAYILAN_KOLAY, tavan: 2500 };
-  return { model: env.VISION_MODEL_ORTA || VARSAYILAN_ORTA, tavan: 4000 }; // orta / bilinmiyor
+type ReasoningSeviye = 'minimal' | 'low' | 'medium' | 'high';
+
+/**
+ * Zorluğa göre çözücü model + token tavanı + reasoning seviyesi (env'den, varsayılanlarla).
+ * Reasoning modellerinde (gpt-5*) tavan, reasoning + görünür çıktının İKİSİNİ birden barındırmalı;
+ * aksi halde bütçe reasoning'e gidip içerik boş döner. Zor soruda reasoning'i koru (doğruluk),
+ * tavanı yüksek tut; orta soruda reasoning'i 'low' yapıp hız/maliyet dengele.
+ */
+function cozucuSec(
+  env: Env,
+  zorluk?: string
+): { model: string; tavan: number; reasoning?: ReasoningSeviye } {
+  if (zorluk === 'zor')
+    return { model: env.VISION_MODEL_ZOR || VARSAYILAN_ZOR, tavan: 12000, reasoning: 'medium' };
+  if (zorluk === 'kolay')
+    // gpt-4.1: reasoning OLMAYAN model → reasoning_effort gönderilmez.
+    return { model: env.VISION_MODEL_KOLAY || VARSAYILAN_KOLAY, tavan: 2500 };
+  // orta / bilinmiyor
+  return { model: env.VISION_MODEL_ORTA || VARSAYILAN_ORTA, tavan: 6000, reasoning: 'low' };
 }
 
 /**
@@ -357,7 +381,7 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
   }
 
   // 2) Zorluğa göre çözücü seç (kolay→gpt-4.1, orta→gpt-5-mini, zor→gpt-5).
-  const { model, tavan } = cozucuSec(env, triaj.zorluk);
+  const { model, tavan, reasoning } = cozucuSec(env, triaj.zorluk);
   const istek = not
     ? `Bu fotoğraftaki YKS sorusunu çöz. Öğrencinin notu/isteği: "${not}" — buna da dikkat et.`
     : 'Bu fotoğraftaki YKS sorusunu çöz.';
@@ -365,6 +389,7 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
     model,
     messages: [{ role: 'system', content: SORU_PROMPT }, gorselMesaji(dataUrl, istek)],
     max_completion_tokens: tavan,
+    reasoning_effort: reasoning,
   });
   if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
 
@@ -383,7 +408,13 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
 /** OpenAI chat/completions çağrısı (JSON çıktı). Ortak hata yönetimi. */
 async function openAiTamamla(
   env: Env,
-  payload: { model: string; messages: unknown[]; max_completion_tokens: number }
+  payload: {
+    model: string;
+    messages: unknown[];
+    max_completion_tokens: number;
+    /** Yalnızca reasoning modellerinde (gpt-5*) gönderilir; undefined ise JSON'dan düşer. */
+    reasoning_effort?: ReasoningSeviye;
+  }
 ): Promise<{ ham?: string; hata?: string; detay?: string }> {
   let oaYanit: Response;
   try {
@@ -396,6 +427,7 @@ async function openAiTamamla(
       body: JSON.stringify({
         ...payload,
         // Yeni model uyumu: max_tokens yerine max_completion_tokens; temperature gönderilmez.
+        // reasoning_effort undefined ise JSON.stringify onu otomatik atar (reasoning olmayan modeller).
         response_format: { type: 'json_object' },
       }),
     });
