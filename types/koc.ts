@@ -125,6 +125,7 @@ export interface HaftalikPlanVeri {
   }[];
   cta?: KartCTA;
   acikGun?: number; // açık akordeon index (kalıcı state)
+  eklendi?: boolean; // plan takvime aktarıldı mı (kalıcı state)
 }
 
 export interface FormulKartiVeri {

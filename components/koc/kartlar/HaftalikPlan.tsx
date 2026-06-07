@@ -1,4 +1,5 @@
 // Haftalık Plan — 7 günlük genişletilebilir program + "Takvime aktar" CTA.
+import { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../../constants/colors';
@@ -7,14 +8,26 @@ import { KartBaslik } from '../KartBaslik';
 import { Press } from '../Press';
 import { KocButon } from '../KocButon';
 import { RADIUS } from '../tokens';
+import { sureEtiketi } from '../../../utils/planAktar';
+import { PlaniTakvimeAktarModal } from '../PlaniTakvimeAktarModal';
 import type { KartBilesenProps } from './_ortak';
 
 export function HaftalikPlan({ veri, onGuncelle, onAksiyon }: KartBilesenProps<HaftalikPlanVeri>) {
   const acik = veri.acikGun ?? -1;
   const gunler = veri.gunler ?? [];
+  const [modalAcik, setModalAcik] = useState(false);
 
   function toggle(i: number) {
     onGuncelle({ ...veri, acikGun: acik === i ? -1 : i });
+  }
+
+  // CTA: günler varsa takvime-aktar modalını aç; yoksa eski aksiyon davranışı.
+  function ctaBas() {
+    if (gunler.length > 0) {
+      setModalAcik(true);
+    } else {
+      onAksiyon(veri.cta?.aksiyon, veri.cta?.etiket);
+    }
   }
 
   return (
@@ -46,7 +59,12 @@ export function HaftalikPlan({ veri, onGuncelle, onAksiyon }: KartBilesenProps<H
                   <Text style={s.odak} numberOfLines={1}>
                     {g.odak}
                   </Text>
-                  <Text style={s.sure}>{g.sure}</Text>
+                  {!!g.sure && (
+                    <View style={s.sureSatir}>
+                      <Ionicons name="timer-outline" size={11} color={COLORS.textLight} />
+                      <Text style={s.sure}>{sureEtiketi(g.sure)}</Text>
+                    </View>
+                  )}
                 </View>
                 <Ionicons name={on ? 'chevron-down' : 'chevron-forward'} size={15} color={COLORS.textLight} />
               </Press>
@@ -64,15 +82,30 @@ export function HaftalikPlan({ veri, onGuncelle, onAksiyon }: KartBilesenProps<H
           );
         })}
       </View>
-      {!!veri.cta && (
-        <KocButon
-          etiket={veri.cta.etiket}
-          ikon="calendar"
-          varyant="gradyan"
-          onPress={() => onAksiyon(veri.cta?.aksiyon, veri.cta?.etiket)}
-          style={{ marginHorizontal: 12, marginBottom: 14 }}
-        />
+      {veri.eklendi ? (
+        <View style={s.eklendiBtn}>
+          <Ionicons name="checkmark-circle" size={17} color={COLORS.success} />
+          <Text style={s.eklendiMetin}>Takvime eklendi</Text>
+        </View>
+      ) : (
+        // Günler varsa CTA modelce verilmese de "Takvime ekle" butonu hep gösterilir.
+        (gunler.length > 0 || !!veri.cta) && (
+          <KocButon
+            etiket={veri.cta?.etiket || 'Takvime ekle'}
+            ikon="calendar"
+            varyant="gradyan"
+            onPress={ctaBas}
+            style={{ marginHorizontal: 12, marginBottom: 14 }}
+          />
+        )
       )}
+
+      <PlaniTakvimeAktarModal
+        acik={modalAcik}
+        veri={veri}
+        onKapat={() => setModalAcik(false)}
+        onEklendi={() => onGuncelle({ ...veri, eklendi: true })}
+      />
     </View>
   );
 }
@@ -87,7 +120,22 @@ const s = StyleSheet.create({
   gunBugun: { color: '#fff', backgroundColor: COLORS.primary },
   renkCubuk: { width: 4, height: 26, borderRadius: 99 },
   odak: { fontSize: 13.5, fontWeight: '600', color: COLORS.text },
+  sureSatir: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
   sure: { fontSize: 11.5, color: COLORS.textSecondary, fontWeight: '500' },
+  eklendiBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginHorizontal: 12,
+    marginBottom: 14,
+    paddingVertical: 12,
+    borderRadius: RADIUS.buton,
+    backgroundColor: COLORS.success + '14',
+    borderWidth: 1,
+    borderColor: COLORS.success + '40',
+  },
+  eklendiMetin: { fontSize: 13.5, fontWeight: '700', color: COLORS.success },
   isler: { paddingLeft: 53, paddingRight: 6, paddingBottom: 10 },
   isSatir: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   nokta: { width: 5, height: 5, borderRadius: 99 },
