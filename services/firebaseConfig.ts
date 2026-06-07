@@ -1,5 +1,12 @@
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth, type Auth } from 'firebase/auth';
+// getReactNativePersistence yalnızca firebase/auth'ın React Native bundle'ında
+// bulunur (Metro `react-native` koşulunu çözer). TS'in public tipleri bu export'u
+// görmediği için ayrı ve bastırılmış import kullanıyoruz; çalışma zamanında mevcut.
+// @ts-ignore
+import { getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -12,5 +19,15 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// Web'de getAuth zaten tarayıcı (localStorage) kalıcılığı kullanır.
+// React Native'de oturumu kapanış sonrası korumak için AsyncStorage'a bağlı
+// initializeAuth gerekir; aksi halde her açılışta oturum kaybolur.
+export const auth: Auth =
+  Platform.OS === 'web'
+    ? getAuth(app)
+    : initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
+
 export const db = getFirestore(app);
