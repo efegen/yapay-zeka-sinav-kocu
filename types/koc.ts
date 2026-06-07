@@ -66,7 +66,9 @@ export interface MiniDenemeAnaliziVeri {
 }
 
 export interface CozumAdimlariVeri {
-  soru: string;
+  /** Çözüme kısa giriş/yaklaşım (soruyu/şıkları TEKRARLAMAZ). */
+  giris?: string;
+  soru?: string; // (geriye uyumluluk — artık başlıkta gösterilmiyor)
   adimlar: { ad: string; detay: string; sekil?: string }[];
   sonuc: string;
   acikAdim?: number; // açık akordeon index (kalıcı state)

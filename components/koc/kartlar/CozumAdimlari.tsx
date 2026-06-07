@@ -21,9 +21,9 @@ export function CozumAdimlari({ veri, onGuncelle }: KartBilesenProps<CozumAdimla
   return (
     <View>
       <KartBaslik icon="book" baslik="Adım adım çözüm" />
-      {!!veri.soru && (
+      {!!veri.giris && (
         <View style={s.soruKutu}>
-          <Formul icerik={veri.soru} renk={COLORS.textSecondary} boyut={13} />
+          <Formul icerik={veri.giris} renk={COLORS.textSecondary} boyut={13} />
         </View>
       )}
       {!!veri.sekil && <Sekil svg={veri.sekil} />}

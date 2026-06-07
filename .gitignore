@@ -45,3 +45,9 @@ google-services.json
 GoogleService-Info.plist
 node_modules/
 .expo/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example

@@ -69,6 +69,9 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => (
             <TabIcon name={focused ? 'sparkles' : 'sparkles-outline'} focused={focused} />
           ),
+          // Tam Ekran Sohbet (Çözüm A): sohbet açıkken global alt sekme çubuğunu gizle —
+          // altta tek çubuk (mesaj girişi) kalsın. Geri için başlıktaki ← butonu kullanılır.
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen

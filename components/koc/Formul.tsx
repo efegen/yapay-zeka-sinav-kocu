@@ -102,12 +102,18 @@ function FormulNative({ icerik, renk, boyut, kalin, hizala, style }: IcFormulPro
 <script src="${CDN}/contrib/auto-render.min.js"></script>
 <script>
   function bildirYukseklik(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(String(document.documentElement.scrollHeight)); } }
-  function sigdir(){ var c=document.getElementById('k'); if(!c) return; var w=c.clientWidth;
+  function sigdir(){ var c=document.getElementById('k'); if(!c) return; var w=c.clientWidth; if(!w) return;
     var ds=c.getElementsByClassName('katex-display');
     for(var i=0;i<ds.length;i++){ var d=ds[i], k=d.getElementsByClassName('katex')[0]; if(!k) continue;
       var mw=k.getBoundingClientRect().width;
       if(mw>w+0.5 && mw>0){ var s=w/mw; k.style.transformOrigin='left top'; k.style.transform='scale('+s+')';
-        d.style.height=k.getBoundingClientRect().height+'px'; d.style.textAlign='left'; } } }
+        d.style.height=k.getBoundingClientRect().height+'px'; d.style.textAlign='left'; } }
+    var all=c.getElementsByClassName('katex');
+    for(var j=0;j<all.length;j++){ var ke=all[j];
+      if(ke.closest && ke.closest('.katex-display')) continue;
+      if(ke.style.transform) continue;
+      var mw2=ke.getBoundingClientRect().width;
+      if(mw2>w+0.5 && mw2>0){ var s2=w/mw2; ke.style.display='inline-block'; ke.style.transformOrigin='left top'; ke.style.transform='scale('+s2+')'; } } }
   function ciz(){ try{ renderMathInElement(document.getElementById('k'), { delimiters: ${JSON.stringify(SINIRLAYICILAR)}, throwOnError:false }); }catch(e){} sigdir(); bildirYukseklik(); setTimeout(function(){ sigdir(); bildirYukseklik(); }, 250); }
   if(document.readyState!=='loading') ciz(); else window.addEventListener('load', ciz);
 </script></body></html>`;
@@ -159,10 +165,17 @@ function katexYukle(): Promise<void> {
   return katexHazir;
 }
 
-/** Genişliğe sığmayan blok matematiği ölçekleyerek küçültür (taşmayı önler). */
+/**
+ * Genişliğe sığmayan matematiği ölçekleyerek küçültür (taşmayı önler).
+ * 1) Blok matematik ($$...$$ → .katex-display).
+ * 2) Satır içi matematik ($...$ → .katex): kabı aşan TEKİL ifadeleri de ölçekle.
+ *    Koşul mw>w olduğu için yalnızca tüm kabı aşan uzun denklemler küçülür;
+ *    cümle ortasındaki kısa terimlere dokunulmaz.
+ */
 function fitMatematik(kap: any) {
   if (!kap) return;
   const w = kap.clientWidth;
+  if (!w) return;
   const ds = kap.getElementsByClassName('katex-display');
   for (let i = 0; i < ds.length; i++) {
     const d = ds[i];
@@ -175,6 +188,19 @@ function fitMatematik(kap: any) {
       k.style.transform = `scale(${s})`;
       d.style.height = k.getBoundingClientRect().height + 'px';
       d.style.textAlign = 'left';
+    }
+  }
+  const all = kap.getElementsByClassName('katex');
+  for (let i = 0; i < all.length; i++) {
+    const k = all[i];
+    if (k.closest && k.closest('.katex-display')) continue; // blok zaten işlendi
+    if (k.style.transform) continue; // tekrar ölçekleme
+    const mw = k.getBoundingClientRect().width;
+    if (mw > w + 0.5 && mw > 0) {
+      const s = w / mw;
+      k.style.display = 'inline-block';
+      k.style.transformOrigin = 'left top';
+      k.style.transform = `scale(${s})`;
     }
   }
 }
