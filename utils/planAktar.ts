@@ -120,8 +120,10 @@ function islerdenAdimlar(isler: string[], toplamDk: number): Adim[] | undefined 
     const sonMu = i === n - 1;
     const dk = sonMu ? Math.max(5, kalan) : taban;
     kalan -= dk;
-    const soru = /(soru|çöz|coz|test)/i.test(ad);
-    const adim: Adim = { tip: soru ? 'soru' : 'oku', ad, dk, done: false };
+    // Mola önce: "mola/dinlen/nefes" geçen satırlar dinlenme adımıdır (soru/net yok).
+    const mola = /(mola|dinlen|nefes)/i.test(ad);
+    const soru = !mola && /(soru|çöz|coz|test)/i.test(ad);
+    const adim: Adim = { tip: mola ? 'mola' : soru ? 'soru' : 'oku', ad, dk, done: false };
     if (soru) {
       const m = ad.match(/(\d+)\s*soru/i);
       if (m) adim.soru = parseInt(m[1], 10);

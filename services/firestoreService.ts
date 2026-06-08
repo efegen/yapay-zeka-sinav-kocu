@@ -151,8 +151,8 @@ export const checkAndRetrySyncIfNeeded = async (
 export type GorevTip = 'planned' | 'anytime';
 // Görevin türü: normal çalışma planı ya da deneme sınavı.
 export type GorevTur = 'plan' | 'deneme';
-// Plan adımının türü: okuma/tekrar adımı ya da soru çözme adımı.
-export type AdimTip = 'oku' | 'soru';
+// Plan adımının türü: okuma/tekrar adımı, soru çözme adımı ya da mola.
+export type AdimTip = 'oku' | 'soru' | 'mola';
 
 // Bir planın içindeki küçük çalışma adımı (kendi süresi ve sayacı olur).
 export interface Adim {
