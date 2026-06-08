@@ -22,7 +22,6 @@ import {
   GorevTip,
   gorevEkle,
   gorevSil,
-  gorevTamamla,
   ayGorevleriniGetir,
   gunGorevleriniGetir,
 } from '../../services/firestoreService';
@@ -71,6 +70,26 @@ function sureMetni(dk: number): string {
   return s ? (k ? `${s}s ${k}dk` : `${s} saat`) : `${k} dk`;
 }
 
+function ikiHane(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+// Bir görevin saatini "HH:MM" döndürür — yalnızca gece yarısı DIŞINDA bir saat
+// taşıyorsa. Plan görevleri saf tarih (gece yarısı) tutar → null (saat gösterilmez).
+// Deneme/sınav gerçek bir saat taşıyabilir → "10:00" gibi.
+function saatMetni(ts: Gorev['tarih']): string | null {
+  if (!ts) return null;
+  const d = ts.toDate();
+  if (d.getHours() === 0 && d.getMinutes() === 0) return null;
+  return `${ikiHane(d.getHours())}:${ikiHane(d.getMinutes())}`;
+}
+
+// YKS oturum bilgisi (gerçek takvim olayı: saat + süre taşır).
+const SINAV_OTURUM: Record<'tyt' | 'ayt', { ad: string; saat: string; meta: string }> = {
+  tyt: { ad: 'YKS · 1. Oturum (TYT)', saat: '10:15', meta: 'Sınav günü · 165 dk' },
+  ayt: { ad: 'YKS · 2. Oturum (AYT)', saat: '10:15', meta: 'Sınav günü · 180 dk' },
+};
+
 function gunMu(g: Gorev, gun: number): boolean {
   return !!g.tarih && g.tarih.toDate().getDate() === gun;
 }
@@ -81,6 +100,7 @@ const BOŞ_FORM = {
   tip: 'planned' as GorevTip,
   deneme: false,
   sure: '25',
+  saat: '', // yalnızca deneme için opsiyonel başlangıç saati ("HH:MM")
 };
 
 export default function Takvim() {
@@ -212,6 +232,9 @@ export default function Takvim() {
   const toplamDk = gunPlanlari.reduce((t, g) => t + (g.sure || 0), 0);
   const dersNoktalari = [...new Set(planlar.map((g) => dersRenk(g.ders)))].slice(0, 5);
   const seciliSinav = seciliAyMi ? sinavGunuMu(seciliGun) : null;
+  const bugunSecili = ayniGunMu(secilenTarih, bugun);
+  // "ŞİMDİ": yalnızca bugünü görüntülerken, ilk bitmemiş plan görevi öne çıkar.
+  const simdiId = bugunSecili ? planlar.find((g) => !g.tamamlandi)?.id ?? null : null;
 
   // YKS'ye kalan gün.
   const geriSayim = Math.max(
@@ -220,16 +243,6 @@ export default function Takvim() {
   );
 
   // ── Görev işlemleri ──
-  async function tamamlaToggle(g: Gorev) {
-    if (!uid) return;
-    try {
-      await gorevTamamla(uid, g.id, !g.tamamlandi);
-      await ayYukle();
-    } catch (err) {
-      console.error('[Takvim] tamamlaToggle hatası:', err);
-    }
-  }
-
   function silOnay(g: Gorev) {
     bildir('Görevi Sil', `"${g.baslik}" görevini silmek istediğinizden emin misiniz?`, [
       { text: 'İptal', style: 'cancel' },
@@ -258,9 +271,17 @@ export default function Takvim() {
     try {
       let tarih: Timestamp | null = null;
       if (form.tip === 'planned') {
-        // Saat yok: görev yalnızca o güne ait (gece yarısı = saf tarih işareti).
         const gun = new Date(secilenTarih);
-        gun.setHours(0, 0, 0, 0);
+        // Deneme gerçek bir takvim olayıdır → opsiyonel "HH:MM" saatini taşır.
+        // Plan görevlerinde saat yoktur (gece yarısı = saf tarih işareti).
+        const saatEslesme = form.deneme ? form.saat.trim().match(/^(\d{1,2}):(\d{2})$/) : null;
+        if (saatEslesme) {
+          const sa = Math.min(23, parseInt(saatEslesme[1], 10));
+          const dak = Math.min(59, parseInt(saatEslesme[2], 10));
+          gun.setHours(sa, dak, 0, 0);
+        } else {
+          gun.setHours(0, 0, 0, 0);
+        }
         tarih = Timestamp.fromDate(gun);
       }
       await gorevEkle(uid, {
@@ -319,81 +340,89 @@ export default function Takvim() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
-        {/* hafta günü başlıkları */}
-        <View style={styles.gunBasliklari}>
-          {GUN_KISALTMALARI.map((g, i) => (
-            <Text key={g} style={[styles.gunBaslik, i >= 5 && { color: COLORS.accent }]}>
-              {g}
-            </Text>
-          ))}
-        </View>
-
-        {/* ızgara */}
-        <View style={styles.izgara}>
-          {haftalar.map((hafta, hi) => (
-            <View key={hi} style={styles.haftaSatiri}>
-              {hafta.map((gun, gi) => (
-                <GunHucresi
-                  key={gi}
-                  gun={gun}
-                  bugunMu={gun > 0 && ayniGunMu(new Date(goruntulenen.yil, goruntulenen.ay, gun), bugun)}
-                  secili={gun > 0 && seciliAyMi && gun === seciliGun}
-                  sinav={gun > 0 ? sinavGunuMu(gun) : null}
-                  deneme={gun > 0 && denemeGunuMu(gun)}
-                  noktalar={gun > 0 ? gunNoktalari(gun) : []}
-                  onPress={() => setSecilenTarih(new Date(goruntulenen.yil, goruntulenen.ay, gun))}
-                />
-              ))}
-            </View>
-          ))}
-        </View>
-
-        {/* seçili gün özeti */}
-        <View style={styles.ozetKart}>
-          {planSay > 0 ? (
-            <Ring size={50} stroke={6} value={bitenSay} max={planSay} color={PRIMARY}>
-              <Text style={styles.ozetRingMetin}>
-                {bitenSay}
-                <Text style={styles.ozetRingPay}>/{planSay}</Text>
+        {/* ─── Takvim paneli: hafta günleri + ızgara + gün özeti tek yüzeyde ─── */}
+        <View style={styles.panel}>
+          {/* hafta günü başlıkları */}
+          <View style={styles.gunBasliklari}>
+            {GUN_KISALTMALARI.map((g, i) => (
+              <Text key={g} style={[styles.gunBaslik, i >= 5 && { color: COLORS.accent }]}>
+                {g}
               </Text>
-            </Ring>
-          ) : (
-            <View style={styles.ozetIkonKutu}>
-              <Ionicons name="calendar-outline" size={22} color={PRIMARY} />
-            </View>
-          )}
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={styles.ozetBaslikSatir}>
-              <Text style={styles.ozetGun}>
-                {seciliGun} {AY_ADLARI[secilenTarih.getMonth()]}
-              </Text>
-              <Text style={styles.ozetGunAdi}>{GUN_ADLARI_TAM[secilenTarih.getDay()]}</Text>
-            </View>
-            <View style={styles.ozetMetaSatir}>
-              {ayniGunMu(secilenTarih, bugun) && (
-                <View style={styles.bugunRozet}>
-                  <Text style={styles.bugunRozetMetin}>Bugün</Text>
-                </View>
-              )}
-              {planSay > 0 ? (
-                <Text style={styles.ozetMeta}>
-                  {planSay} görev · {sureMetni(toplamDk)} planlı
-                </Text>
-              ) : (
-                <Text style={[styles.ozetMeta, { color: COLORS.textLight }]}>Plan yok</Text>
-              )}
-            </View>
+            ))}
           </View>
-          {dersNoktalari.length > 0 && (
-            <View style={styles.ozetNoktalar}>
-              {dersNoktalari.map((r, i) => (
-                <View key={i} style={[styles.ozetNokta, { backgroundColor: r }]} />
-              ))}
+
+          {/* ızgara */}
+          <View style={styles.izgara}>
+            {haftalar.map((hafta, hi) => (
+              <View key={hi} style={styles.haftaSatiri}>
+                {hafta.map((gun, gi) => (
+                  <GunHucresi
+                    key={gi}
+                    gun={gun}
+                    bugunMu={gun > 0 && ayniGunMu(new Date(goruntulenen.yil, goruntulenen.ay, gun), bugun)}
+                    secili={gun > 0 && seciliAyMi && gun === seciliGun}
+                    sinav={gun > 0 ? sinavGunuMu(gun) : null}
+                    deneme={gun > 0 && denemeGunuMu(gun)}
+                    noktalar={gun > 0 ? gunNoktalari(gun) : []}
+                    onPress={() => setSecilenTarih(new Date(goruntulenen.yil, goruntulenen.ay, gun))}
+                  />
+                ))}
+              </View>
+            ))}
+          </View>
+
+          {/* gün özeti alt şeridi (panelin tonlu krom kısmı) */}
+          <View style={styles.ozetSerit}>
+            <View style={styles.ozetTarihBlok}>
+              <Text style={styles.ozetTarihGun}>{seciliGun}</Text>
+              <Text style={styles.ozetTarihAy}>
+                {AY_ADLARI[secilenTarih.getMonth()].slice(0, 3)}
+              </Text>
             </View>
-          )}
+            <View style={styles.ozetAyrac} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={styles.ozetGunSatir}>
+                <Text style={styles.ozetGunAdi}>{GUN_ADLARI_TAM[secilenTarih.getDay()]}</Text>
+                {bugunSecili && (
+                  <View style={styles.bugunPill}>
+                    <Text style={styles.bugunPillMetin}>BUGÜN</Text>
+                  </View>
+                )}
+              </View>
+              {planSay > 0 ? (
+                <>
+                  <Text style={styles.ozetDurum}>
+                    {bitenSay}/{planSay} görev bitti · {sureMetni(toplamDk)} planlı
+                  </Text>
+                  <View style={styles.segmentSatir}>
+                    {planlar.map((_, i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.segment,
+                          { backgroundColor: i < bitenSay ? COLORS.success : '#fff' },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.ozetBos}>Plan yok</Text>
+              )}
+            </View>
+            {dersNoktalari.length > 0 && (
+              <View style={styles.ozetNoktalar}>
+                {dersNoktalari.map((r, i) => (
+                  <View key={i} style={[styles.ozetNokta, { backgroundColor: r }]} />
+                ))}
+              </View>
+            )}
+          </View>
         </View>
 
-        {/* ajanda */}
+        {/* ─── Günün planı (ayrı yüzeydeki yüzen kartlar) ─── */}
+        <Text style={styles.bolumBaslik}>GÜNÜN PLANI</Text>
+
         <View style={styles.ajanda}>
           {yukleniyor && gunPlanlari.length === 0 && !seciliSinav ? (
             <View style={styles.yukleniyor}>
@@ -405,20 +434,28 @@ export default function Takvim() {
 
               {gunPlanlari.length === 0 && !seciliSinav && (
                 <View style={styles.bosHal}>
-                  <Text style={styles.bosHalMetin}>Bu güne planın yok.</Text>
-                  <Text style={styles.bosHalAlt}>Aşağıdan ekle ya da koçtan iste.</Text>
+                  <View style={styles.bosHalIkon}>
+                    <Ionicons name="calendar-outline" size={22} color={PRIMARY} />
+                  </View>
+                  <Text style={styles.bosHalMetin}>Bu güne planın yok</Text>
+                  <Text style={styles.bosHalAlt}>Aşağıdan ekle ya da koçtan plan iste.</Text>
                 </View>
               )}
 
               {gunPlanlari.map((g) =>
                 g.tur === 'deneme' ? (
-                  <DenemeKarti key={g.id} gorev={g} onLongPress={() => silOnay(g)} />
+                  <DenemeKarti
+                    key={g.id}
+                    gorev={g}
+                    onPress={() => router.push('/(tabs)/denemeler' as never)}
+                    onLongPress={() => silOnay(g)}
+                  />
                 ) : (
                   <PlanKarti
                     key={g.id}
                     gorev={g}
+                    simdi={g.id === simdiId}
                     onPress={() => planAc(g)}
-                    onToggle={() => tamamlaToggle(g)}
                     onLongPress={() => silOnay(g)}
                   />
                 )
@@ -437,8 +474,8 @@ export default function Takvim() {
                     <PlanKarti
                       key={g.id}
                       gorev={g}
+                      simdi={false}
                       onPress={() => planAc(g)}
-                      onToggle={() => tamamlaToggle(g)}
                       onLongPress={() => silOnay(g)}
                     />
                   ))}
@@ -533,6 +570,26 @@ export default function Takvim() {
                 </View>
                 <Text style={styles.denemeMetin}>Bu bir deneme sınavı</Text>
               </TouchableOpacity>
+            )}
+
+            {/* Deneme gerçek bir takvim olayıdır → opsiyonel başlangıç saati taşır. */}
+            {form.tip === 'planned' && form.deneme && (
+              <View style={styles.alan}>
+                <Text style={styles.alanEtiket}>Başlangıç saati (opsiyonel)</Text>
+                <View style={styles.inputSarici}>
+                  <Ionicons name="time-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
+                  <TextInput
+                    style={styles.input}
+                    value={form.saat}
+                    onChangeText={(v) => setForm((f) => ({ ...f, saat: v }))}
+                    placeholder="10:00"
+                    placeholderTextColor={COLORS.textLight}
+                    keyboardType="numbers-and-punctuation"
+                    maxLength={5}
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
             )}
 
             <View style={styles.alan}>
@@ -646,79 +703,134 @@ function GunHucresi({
 
 // ─── Ajanda kartları ──────────────────────────
 
+// Durum madalyonu: solda tek, tutarlı durum göstergesi (elle onay kutusu YOK).
+// Tamamlanma adımlardan türetilir → 0 adım: ders renginde halka + play ·
+// kısmî: dolan halka + "k/n" · tümü/işaretli: yeşil dolu daire + ✓.
+function DurumMadalyon({
+  renk,
+  biten,
+  toplam,
+  tamam,
+}: {
+  renk: string;
+  biten: number;
+  toplam: number;
+  tamam: boolean;
+}) {
+  if (tamam) {
+    return (
+      <View style={[planStyles.madalyonTam, { backgroundColor: COLORS.success }]}>
+        <Ionicons name="checkmark" size={23} color="#fff" />
+      </View>
+    );
+  }
+  return (
+    <Ring size={46} stroke={5} value={biten} max={toplam || 1} color={renk} track={COLORS.cardBorder}>
+      {biten === 0 ? (
+        <Ionicons name="play" size={15} color={renk} style={{ marginLeft: 2 }} />
+      ) : (
+        <Text style={planStyles.madalyonSayi}>
+          {biten}
+          <Text style={planStyles.madalyonPay}>/{toplam}</Text>
+        </Text>
+      )}
+    </Ring>
+  );
+}
+
 function PlanKarti({
   gorev,
+  simdi,
   onPress,
-  onToggle,
   onLongPress,
 }: {
   gorev: Gorev;
+  simdi: boolean;
   onPress: () => void;
-  onToggle: () => void;
   onLongPress: () => void;
 }) {
   const renk = dersRenk(gorev.ders);
-  const done = gorev.tamamlandi;
   const adimSay = gorev.adimlar?.length ?? 0;
   const bitenAdim = gorev.adimlar?.filter((a) => a.done).length ?? 0;
+  const done = gorev.tamamlandi;
+  const simdiVurgu = simdi && !done;
 
   return (
     <TouchableOpacity
-      style={planStyles.kart}
+      style={[
+        planStyles.kart,
+        simdiVurgu && { borderColor: renk + '55', shadowColor: renk, shadowOpacity: 0.16 },
+        done && { opacity: 0.7 },
+      ]}
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={450}
       activeOpacity={0.85}
     >
-      <View style={[planStyles.solSerit, { backgroundColor: renk }]} />
-      <View style={planStyles.icerik}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <View style={planStyles.dersSatir}>
-            <View style={[planStyles.dersNokta, { backgroundColor: renk }]} />
-            <Text style={[planStyles.dersEtiket, { color: renk }]} numberOfLines={1}>
-              {gorev.ders ?? 'Genel'}
-            </Text>
-          </View>
-          <Text style={[planStyles.konu, done && planStyles.konuDone]} numberOfLines={2}>
-            {gorev.baslik}
+      <DurumMadalyon renk={renk} biten={bitenAdim} toplam={adimSay} tamam={done} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={planStyles.dersSatir}>
+          <Text style={[planStyles.dersEtiket, { color: renk }]} numberOfLines={1}>
+            {(gorev.ders ?? 'Genel').toLocaleUpperCase('tr')}
           </Text>
-          <View style={planStyles.metaSatir}>
-            <Ionicons name="timer-outline" size={11} color={COLORS.textLight} />
-            <Text style={planStyles.meta}>
-              {sureMetni(gorev.sure)}
-              {adimSay > 0 ? ` · ${bitenAdim}/${adimSay} adım` : ''}
-            </Text>
-          </View>
+          {simdiVurgu && (
+            <View style={[planStyles.simdiRozet, { backgroundColor: renk }]}>
+              <Text style={planStyles.simdiRozetMetin}>ŞİMDİ</Text>
+            </View>
+          )}
         </View>
-        <TouchableOpacity onPress={onToggle} hitSlop={8} activeOpacity={0.7}>
-          <View style={[planStyles.check, done && { backgroundColor: COLORS.success, borderColor: COLORS.success }]}>
-            {done && <Ionicons name="checkmark" size={14} color="#fff" />}
-          </View>
-        </TouchableOpacity>
+        <Text style={[planStyles.konu, done && planStyles.konuDone]} numberOfLines={2}>
+          {gorev.baslik}
+        </Text>
+        <View style={planStyles.metaSatir}>
+          <Ionicons name="timer-outline" size={12} color={COLORS.textLight} />
+          <Text style={planStyles.meta}>
+            {sureMetni(gorev.sure)}
+            {done ? ' · tamamlandı' : adimSay > 0 ? ` · ${bitenAdim}/${adimSay} adım` : ''}
+          </Text>
+        </View>
       </View>
+      <Ionicons name="chevron-forward" size={17} color={COLORS.textLight} />
     </TouchableOpacity>
   );
 }
 
-function DenemeKarti({ gorev, onLongPress }: { gorev: Gorev; onLongPress: () => void }) {
+function DenemeKarti({
+  gorev,
+  onPress,
+  onLongPress,
+}: {
+  gorev: Gorev;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const saat = saatMetni(gorev.tarih);
   return (
-    <TouchableOpacity style={denemeStyles.kart} onLongPress={onLongPress} delayLongPress={450} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={denemeStyles.kart}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={450}
+      activeOpacity={0.85}
+    >
       <View style={denemeStyles.ikonKutu}>
-        <Ionicons name="trophy" size={20} color={COLORS.accent} />
+        <Ionicons name="trophy" size={22} color={COLORS.accent} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={denemeStyles.ustSatir}>
+          <Text style={denemeStyles.etiket}>DENEME</Text>
+          {saat && <Text style={denemeStyles.saat}>{saat}</Text>}
+        </View>
         <Text style={denemeStyles.ad} numberOfLines={1}>{gorev.baslik}</Text>
         <Text style={denemeStyles.meta}>{sureMetni(gorev.sure)}</Text>
       </View>
-      <View style={denemeStyles.rozet}>
-        <Text style={denemeStyles.rozetMetin}>Deneme</Text>
-      </View>
+      <Ionicons name="chevron-forward" size={17} color={COLORS.textLight} />
     </TouchableOpacity>
   );
 }
 
 function SinavKarti({ tur }: { tur: 'tyt' | 'ayt' }) {
-  const ad = tur === 'tyt' ? 'YKS · 1. Oturum (TYT)' : 'YKS · 2. Oturum (AYT)';
+  const oturum = SINAV_OTURUM[tur];
   return (
     <LinearGradient
       colors={[COLORS.primary, COLORS.accent]}
@@ -727,12 +839,17 @@ function SinavKarti({ tur }: { tur: 'tyt' | 'ayt' }) {
       style={sinavStyles.kart}
     >
       <View style={sinavStyles.ikonKutu}>
-        <Ionicons name="flag" size={20} color="#fff" />
+        <Ionicons name="flag" size={22} color="#fff" />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={sinavStyles.ad}>{ad}</Text>
-        <Text style={sinavStyles.meta}>Sınav günü · başarılar! 🎯</Text>
+        <View style={sinavStyles.ustSatir}>
+          <Text style={sinavStyles.etiket}>YKS SINAVI</Text>
+          <Text style={sinavStyles.saat}>{oturum.saat}</Text>
+        </View>
+        <Text style={sinavStyles.ad}>{oturum.ad}</Text>
+        <Text style={sinavStyles.meta}>{oturum.meta}</Text>
       </View>
+      <Ionicons name="chevron-forward" size={17} color="rgba(255,255,255,0.85)" />
     </LinearGradient>
   );
 }
@@ -837,47 +954,60 @@ const styles = StyleSheet.create({
   gunNokta: { width: 5, height: 5, borderRadius: 99 },
   denemeEtiket: { fontSize: 8, fontWeight: '800', letterSpacing: 0.3, color: COLORS.accent },
 
-  ozetKart: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    padding: 14,
-    borderRadius: 18,
+  // Panel: hafta günleri + ızgara + gün özeti tek beyaz yüzeyde birleşir.
+  panel: {
+    marginHorizontal: 14,
+    marginTop: 14,
+    borderRadius: 22,
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    overflow: 'hidden',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.09,
+    shadowRadius: 28,
+    elevation: 3,
+  },
+  // Gün özeti alt şeridi — panelin tonlu (açık mor) kromu.
+  ozetSerit: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.cardBorder,
+    backgroundColor: COLORS.primaryLight + '66',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 2,
+    gap: 13,
   },
-  ozetRingMetin: { fontSize: 13, fontWeight: '800', color: COLORS.text },
-  ozetRingPay: { color: COLORS.textLight, fontWeight: '700' },
-  ozetIkonKutu: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
-    backgroundColor: COLORS.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ozetBaslikSatir: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  ozetGun: { fontSize: 20, fontWeight: '800', color: COLORS.text, letterSpacing: -0.4 },
-  ozetGunAdi: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-  ozetMetaSatir: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
-  ozetMeta: { fontSize: 12.5, fontWeight: '600', color: COLORS.textSecondary },
-  bugunRozet: { backgroundColor: COLORS.primaryLight, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 },
-  bugunRozetMetin: { fontSize: 11, fontWeight: '800', color: PRIMARY },
+  ozetTarihBlok: { alignItems: 'center' },
+  ozetTarihGun: { fontSize: 24, fontWeight: '800', color: PRIMARY, letterSpacing: -0.6, lineHeight: 26 },
+  ozetTarihAy: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, color: PRIMARY, opacity: 0.7, textTransform: 'uppercase', marginTop: 2 },
+  ozetAyrac: { width: 1, alignSelf: 'stretch', backgroundColor: PRIMARY + '26' },
+  ozetGunSatir: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ozetGunAdi: { fontSize: 14, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
+  bugunPill: { backgroundColor: PRIMARY, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 },
+  bugunPillMetin: { fontSize: 10, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
+  ozetDurum: { fontSize: 11.5, fontWeight: '600', color: COLORS.textSecondary, marginTop: 3, marginBottom: 7 },
+  segmentSatir: { flexDirection: 'row', gap: 4 },
+  segment: { flex: 1, height: 5, borderRadius: 99 },
+  ozetBos: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginTop: 4 },
   ozetNoktalar: { flexDirection: 'row', gap: 4 },
   ozetNokta: { width: 7, height: 7, borderRadius: 99 },
 
-  ajanda: { paddingHorizontal: 16, paddingTop: 12, gap: 9 },
+  bolumBaslik: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: COLORS.textLight,
+    textTransform: 'uppercase',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+  },
+  ajanda: { paddingHorizontal: 16, paddingTop: 10, gap: 9 },
   yukleniyor: { paddingVertical: 30, alignItems: 'center' },
   bosHal: {
-    paddingVertical: 24,
+    paddingVertical: 30,
     paddingHorizontal: 18,
     alignItems: 'center',
     borderRadius: 16,
@@ -886,8 +1016,17 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: COLORS.cardBorder,
   },
-  bosHalMetin: { fontSize: 13.5, fontWeight: '700', color: COLORS.textSecondary },
-  bosHalAlt: { fontSize: 12.5, fontWeight: '600', color: COLORS.textLight, marginTop: 3 },
+  bosHalIkon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  bosHalMetin: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  bosHalAlt: { fontSize: 12.5, fontWeight: '600', color: COLORS.textSecondary, marginTop: 3, textAlign: 'center' },
   planaEkle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1014,62 +1153,75 @@ const styles = StyleSheet.create({
 const planStyles = StyleSheet.create({
   kart: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     backgroundColor: COLORS.card,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    overflow: 'hidden',
+    shadowColor: COLORS.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 1,
   },
-  solSerit: { width: 4 },
-  icerik: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
-  dersSatir: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 },
-  dersNokta: { width: 7, height: 7, borderRadius: 99 },
-  dersEtiket: { fontSize: 11.5, fontWeight: '700' },
-  konu: { fontSize: 13.5, fontWeight: '600', color: COLORS.text },
-  konuDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
-  metaSatir: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  meta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight },
-  check: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: COLORS.cardBorder,
+  madalyonTam: {
+    width: 46,
+    height: 46,
+    borderRadius: 99,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.success,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 3,
   },
+  madalyonSayi: { fontSize: 12.5, fontWeight: '800', color: COLORS.text },
+  madalyonPay: { color: COLORS.textLight, fontWeight: '700' },
+  dersSatir: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  dersEtiket: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
+  simdiRozet: { borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 },
+  simdiRozetMetin: { fontSize: 9.5, fontWeight: '800', letterSpacing: 0.4, color: '#fff' },
+  konu: { fontSize: 15, fontWeight: '700', color: COLORS.text, letterSpacing: -0.2, lineHeight: 19 },
+  konuDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
+  metaSatir: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 },
+  meta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textSecondary },
 });
 
 const denemeStyles = StyleSheet.create({
   kart: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 13,
     padding: 14,
     borderRadius: 16,
     backgroundColor: COLORS.card,
     borderWidth: 1.5,
-    borderColor: COLORS.accent + '55',
+    borderColor: COLORS.accent + '44',
   },
   ikonKutu: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: COLORS.accent + '1A',
+    width: 46,
+    height: 46,
+    borderRadius: 13,
+    backgroundColor: COLORS.accent + '16',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  ad: { fontSize: 14.5, fontWeight: '800', color: COLORS.text },
-  meta: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
-  rozet: { backgroundColor: COLORS.accent + '14', borderRadius: 99, paddingHorizontal: 12, paddingVertical: 7 },
-  rozetMetin: { fontSize: 12.5, fontWeight: '800', color: COLORS.accent },
+  ustSatir: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  etiket: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3, color: COLORS.accent },
+  saat: { fontSize: 11.5, fontWeight: '700', color: COLORS.textLight },
+  ad: { fontSize: 15, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
+  meta: { fontSize: 11.5, fontWeight: '600', color: COLORS.textSecondary, marginTop: 5 },
 });
 
 const sinavStyles = StyleSheet.create({
   kart: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 13,
     padding: 14,
     borderRadius: 16,
     shadowColor: COLORS.primary,
@@ -1079,13 +1231,16 @@ const sinavStyles = StyleSheet.create({
     elevation: 6,
   },
   ikonKutu: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 46,
+    height: 46,
+    borderRadius: 13,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  ad: { fontSize: 14.5, fontWeight: '800', color: '#fff' },
-  meta: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  ustSatir: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  etiket: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3, color: 'rgba(255,255,255,0.9)' },
+  saat: { fontSize: 11.5, fontWeight: '700', color: 'rgba(255,255,255,0.8)' },
+  ad: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: -0.2 },
+  meta: { fontSize: 11.5, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 5 },
 });
