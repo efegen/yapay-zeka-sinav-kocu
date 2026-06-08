@@ -19,6 +19,7 @@ import {
   Adim,
   AdimTip,
   gorevGetir,
+  gorevTamamla,
   adimlariGuncelle,
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
@@ -34,6 +35,20 @@ function ssFormat(saniye: number): string {
   const dk = Math.floor(saniye / 60);
   const sn = saniye % 60;
   return `${dk}:${ikiHane(sn)}`;
+}
+
+// Adım meta metni — tipe göre ayrık. Mola'nın "net"i YOK.
+function adimMetaMetni(a: Adim): string {
+  if (a.tip === 'soru') return `${a.dk} dk · ${a.soru ?? 0} soru → net`;
+  if (a.tip === 'mola') return `${a.dk} dk · dinlen, soru yok`;
+  return `${a.dk} dk · konu tekrarı`;
+}
+
+// Adım tipine göre küçük ikon (oku → ikon yok). Ionicons karşılıkları.
+function adimTipIkon(tip: AdimTip): keyof typeof Ionicons.glyphMap | null {
+  if (tip === 'soru') return 'radio-button-on';
+  if (tip === 'mola') return 'cafe-outline';
+  return null;
 }
 
 export default function PlanDetay() {
@@ -144,10 +159,25 @@ export default function PlanDetay() {
     setAdimModal(null);
   }
 
+  // ── Tek alt eylem: adımsız (hızlı eklenen) görevi doğrudan tamamla ──
+  async function goreviTamamla() {
+    if (!uid || !id) return;
+    try {
+      await gorevTamamla(uid, id, true);
+      setGorev((g) => (g ? { ...g, tamamlandi: true } : g));
+    } catch (err) {
+      console.error('[PlanDetay] görev tamamlama hatası:', err);
+    }
+  }
+
   // ── Türetilenler ──
   const toplamDk = adimlar.reduce((t, a) => t + (a.dk || 0), 0) || gorev?.sure || 0;
   const bitenSay = adimlar.filter((a) => a.done).length;
   const siradaIndex = adimlar.findIndex((a) => !a.done);
+  // Tamamlanma adımlardan TÜRETİLİR — tüm adımlar bitince görev kendiliğinden biter.
+  const hepBitti = adimlar.length > 0 && bitenSay === adimlar.length;
+  // Adımsız görevlerde yedek: doğrudan işaretlenmiş tamamlanma.
+  const tamamMi = hepBitti || (adimlar.length === 0 && !!gorev?.tamamlandi);
 
   // ── Render durumları ──
   if (yukleniyor) {
@@ -182,14 +212,14 @@ export default function PlanDetay() {
           {mod === 'duzenle' ? 'Adımları düzenle' : 'Plan Detayı'}
         </Text>
         <View style={styles.headerSag}>
-          {sayacAktif ? null : mod === 'duzenle' ? (
+          {/* Tamamlanmış görevde düzenle gizli — başlık ortada kalsın diye 36px boşluk. */}
+          {sayacAktif || tamamMi ? null : mod === 'duzenle' ? (
             <TouchableOpacity style={styles.bittiBtn} onPress={() => setMod('liste')} activeOpacity={0.85}>
               <Text style={styles.bittiBtnMetin}>Bitti</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.duzenleBtn} onPress={() => setMod('duzenle')} activeOpacity={0.85}>
-              <Ionicons name="pencil" size={14} color={COLORS.primary} />
-              <Text style={styles.duzenleBtnMetin}>Düzenle</Text>
+            <TouchableOpacity style={styles.ikonBtn} onPress={() => setMod('duzenle')} activeOpacity={0.85}>
+              <Ionicons name="pencil" size={15} color={COLORS.primary} />
             </TouchableOpacity>
           )}
         </View>
@@ -226,23 +256,40 @@ export default function PlanDetay() {
             toplamDk={toplamDk}
             bitenSay={bitenSay}
             siradaIndex={siradaIndex}
+            hepBitti={hepBitti}
+            tamamMi={tamamMi}
             onBasla={adimBasla}
             onEkle={() => setAdimModal({ index: null })}
           />
         )}
       </ScrollView>
 
-      {/* Liste modunda alt çubuk: Görevi tamamla */}
-      {!sayacAktif && mod === 'liste' && adimlar.length > 0 && (
+      {/* Liste modunda alt çubuk: durum-farkında TEK eylem (otomatik tamamlanma) */}
+      {!sayacAktif && mod === 'liste' && (
         <View style={styles.altCubuk}>
-          <TouchableOpacity
-            style={styles.tamamlaBtn}
-            activeOpacity={0.9}
-            onPress={() => kaydet(adimlar.map((a) => ({ ...a, done: true })))}
-          >
-            <Ionicons name="checkmark" size={19} color={COLORS.success} />
-            <Text style={styles.tamamlaBtnMetin}>Görevi tamamla</Text>
-          </TouchableOpacity>
+          {tamamMi ? (
+            <View style={styles.tamamliSerit}>
+              <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+              <Text style={styles.tamamliMetin}>Görev tamamlandı</Text>
+            </View>
+          ) : adimlar.length > 0 ? (
+            <TouchableOpacity onPress={() => adimBasla(siradaIndex)} activeOpacity={0.9}>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.baslatBtn}
+              >
+                <Ionicons name="play" size={19} color="#fff" />
+                <Text style={styles.baslatMetin}>Sıradaki adımı başlat</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.tamamlaBtn} activeOpacity={0.9} onPress={goreviTamamla}>
+              <Ionicons name="checkmark" size={19} color={COLORS.success} />
+              <Text style={styles.tamamlaBtnMetin}>Görevi tamamla</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -298,6 +345,8 @@ function ListeGorunum({
   toplamDk,
   bitenSay,
   siradaIndex,
+  hepBitti,
+  tamamMi,
   onBasla,
   onEkle,
 }: {
@@ -307,87 +356,115 @@ function ListeGorunum({
   toplamDk: number;
   bitenSay: number;
   siradaIndex: number;
+  hepBitti: boolean;
+  tamamMi: boolean;
   onBasla: (i: number) => void;
   onEkle: () => void;
 }) {
+  const toplam = adimlar.length;
+  const ilerleme = toplam > 0 ? bitenSay / toplam : 0;
+
   return (
     <>
-      <Hero renk={renk} gorev={gorev} toplamDk={toplamDk} adet={adimlar.length} />
+      <Hero renk={renk} gorev={gorev} toplamDk={toplamDk} adet={toplam} />
+
+      {/* Görev ilerleme çubuğu — adımlar bitince yeşile döner */}
+      {toplam > 0 && (
+        <View style={styles.ilerlemeSatir}>
+          <View style={styles.ilerlemeRay}>
+            {hepBitti ? (
+              <View style={[styles.ilerlemeDolgu, { width: '100%', backgroundColor: COLORS.success }]} />
+            ) : (
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.ilerlemeDolgu, { width: `${Math.max(6, ilerleme * 100)}%` }]}
+              />
+            )}
+          </View>
+          <Text style={[styles.ilerlemeSay, hepBitti && { color: COLORS.success }]}>
+            {hepBitti ? 'Bitti' : `${bitenSay}/${toplam}`}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.bolumBaslikSatir}>
         <Text style={styles.bolumBaslik}>Çalışma adımları</Text>
-        {adimlar.length > 0 && (
-          <Text style={styles.bolumSay}>
-            {bitenSay}/{adimlar.length}
-          </Text>
-        )}
+        {toplam > 0 && <Text style={styles.bolumSay}>{bitenSay}/{toplam} tamam</Text>}
       </View>
-      <Text style={styles.bolumAlt}>Her adımı kendi sayacıyla çalış — sıradaki vurgulu.</Text>
+      <Text style={styles.bolumAlt}>
+        Adımları bitirdikçe görev kendiliğinden tamamlanır.
+      </Text>
 
       <View style={styles.listeKart}>
-        {adimlar.length === 0 && (
+        {toplam === 0 && (
           <Text style={styles.listeBos}>Henüz adım yok. Aşağıdan ilk adımını ekle.</Text>
         )}
         {adimlar.map((a, i) => {
-          const soru = a.tip === 'soru';
           const next = i === siradaIndex;
+          const ikon = adimTipIkon(a.tip);
+          const ikonRenk = a.done ? COLORS.textLight : a.tip === 'mola' ? COLORS.textSecondary : renk;
           return (
             <View
               key={i}
               style={[
                 styles.adimSatir,
                 i > 0 && styles.adimSatirSinir,
-                next && { backgroundColor: COLORS.primaryLight + '55' },
+                next && { backgroundColor: COLORS.primaryLight + '66' },
               ]}
             >
-              {soru ? (
-                <View style={[styles.adimIkon, { backgroundColor: renk + '1A' }]}>
-                  <Ionicons name="radio-button-on" size={16} color={renk} />
+              {/* sol durum dairesi — tutarlı tek gösterge */}
+              {a.done ? (
+                <View style={styles.durumTam}>
+                  <Ionicons name="checkmark" size={14} color="#fff" />
+                </View>
+              ) : next ? (
+                <View style={[styles.durumNext, { borderColor: renk }]}>
+                  <View style={[styles.durumNextNokta, { backgroundColor: renk }]} />
                 </View>
               ) : (
-                <View
-                  style={[
-                    styles.adimKutu,
-                    a.done && { backgroundColor: COLORS.success, borderColor: COLORS.success },
-                  ]}
-                >
-                  {a.done && <Ionicons name="checkmark" size={13} color="#fff" />}
-                </View>
+                <View style={styles.durumBos} />
               )}
+
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  style={[
-                    styles.adimAd,
-                    soru && { fontWeight: '800' },
-                    a.done && styles.adimAdDone,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {a.ad}
-                </Text>
+                <View style={styles.adimAdSatir}>
+                  {ikon && <Ionicons name={ikon} size={13} color={ikonRenk} />}
+                  <Text
+                    style={[styles.adimAd, a.done && styles.adimAdDone, { flex: 1, minWidth: 0 }]}
+                    numberOfLines={2}
+                  >
+                    {a.ad}
+                  </Text>
+                </View>
                 <View style={styles.adimMetaSatir}>
                   <Ionicons name="timer-outline" size={11} color={COLORS.textLight} />
-                  <Text style={[styles.adimMeta, { color: soru ? renk : COLORS.textLight }]}>
-                    {soru ? `${a.dk} dk · ${a.soru ?? 0} soru → net` : `${a.dk} dk`}
-                    {next ? ' · sıradaki' : ''}
+                  <Text
+                    style={[
+                      styles.adimMeta,
+                      { color: a.tip === 'soru' && !a.done ? renk : COLORS.textLight },
+                    ]}
+                  >
+                    {adimMetaMetni(a)}
                   </Text>
                 </View>
               </View>
-              {a.done ? (
-                <Ionicons name="checkmark" size={18} color={COLORS.success} />
-              ) : (
-                <BaslaBtn solid={next} renk={renk} onPress={() => onBasla(i)} />
-              )}
+
+              {/* sağ eylem: yalnızca sıradaki dolu Başla; diğer bitmemişler çizgili; biten yok */}
+              {!a.done && <BaslaBtn solid={next} renk={renk} onPress={() => onBasla(i)} />}
             </View>
           );
         })}
 
-        <TouchableOpacity style={styles.ekleSatir} onPress={onEkle} activeOpacity={0.8}>
-          <View style={styles.ekleKutu}>
-            <Ionicons name="add" size={14} color={COLORS.primary} />
-          </View>
-          <Text style={styles.ekleMetin}>Adım ekle</Text>
-        </TouchableOpacity>
+        {/* Adım ekle — yalnızca görev bitmemişken */}
+        {!tamamMi && (
+          <TouchableOpacity style={styles.ekleSatir} onPress={onEkle} activeOpacity={0.8}>
+            <View style={styles.ekleKutu}>
+              <Ionicons name="add" size={14} color={COLORS.primary} />
+            </View>
+            <Text style={styles.ekleMetin}>Adım ekle</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </>
   );
@@ -625,9 +702,9 @@ function SayacGorunum({
           <View style={styles.siradaKart}>
             <View style={[styles.adimIkon, { backgroundColor: renk + '1A' }]}>
               <Ionicons
-                name={adimlar[siradaki].tip === 'soru' ? 'radio-button-on' : 'book-outline'}
+                name={adimTipIkon(adimlar[siradaki].tip) ?? 'book-outline'}
                 size={16}
-                color={renk}
+                color={adimlar[siradaki].tip === 'mola' ? COLORS.textSecondary : renk}
               />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -635,9 +712,7 @@ function SayacGorunum({
               <View style={styles.adimMetaSatir}>
                 <Ionicons name="timer-outline" size={11} color={COLORS.textLight} />
                 <Text style={[styles.adimMeta, { color: renk }]}>
-                  {adimlar[siradaki].tip === 'soru'
-                    ? `${adimlar[siradaki].dk} dk · ${adimlar[siradaki].soru ?? 0} soru → net`
-                    : `${adimlar[siradaki].dk} dk`}
+                  {adimMetaMetni(adimlar[siradaki])}
                 </Text>
               </View>
             </View>
@@ -715,14 +790,21 @@ function AdimDuzenleModal({
             onPress={() => setTip('oku')}
             activeOpacity={0.8}
           >
-            <Text style={[styles.modalSegMetin, tip === 'oku' && styles.modalSegMetinAktif]}>Okuma / tekrar</Text>
+            <Text style={[styles.modalSegMetin, tip === 'oku' && styles.modalSegMetinAktif]}>Okuma</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.modalSegBtn, tip === 'soru' && styles.modalSegBtnAktif]}
             onPress={() => setTip('soru')}
             activeOpacity={0.8}
           >
-            <Text style={[styles.modalSegMetin, tip === 'soru' && styles.modalSegMetinAktif]}>Soru çözme</Text>
+            <Text style={[styles.modalSegMetin, tip === 'soru' && styles.modalSegMetinAktif]}>Soru</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modalSegBtn, tip === 'mola' && styles.modalSegBtnAktif]}
+            onPress={() => setTip('mola')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.modalSegMetin, tip === 'mola' && styles.modalSegMetinAktif]}>Mola</Text>
           </TouchableOpacity>
         </View>
 
@@ -806,18 +888,6 @@ const styles = StyleSheet.create({
   },
   headerBaslik: { fontSize: 16, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
   headerSag: { minWidth: 36, alignItems: 'flex-end' },
-  duzenleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    height: 36,
-    paddingHorizontal: 13,
-    borderRadius: 11,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  duzenleBtnMetin: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
   bittiBtn: {
     height: 36,
     paddingHorizontal: 16,
@@ -852,19 +922,38 @@ const styles = StyleSheet.create({
   adimSatir: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
   adimSatirSinir: { borderTopWidth: 1, borderTopColor: COLORS.cardBorder },
   adimIkon: { width: 26, height: 26, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  adimKutu: {
+  adimAdSatir: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  adimAd: { fontSize: 14, fontWeight: '600', color: COLORS.text, lineHeight: 18 },
+  adimAdDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
+  adimMetaSatir: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  adimMeta: { fontSize: 11.5, fontWeight: '600' },
+
+  // İlerleme çubuğu (hero altında)
+  ilerlemeSatir: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 14, marginBottom: 18 },
+  ilerlemeRay: { flex: 1, height: 8, borderRadius: 99, backgroundColor: COLORS.cardBorder, overflow: 'hidden' },
+  ilerlemeDolgu: { height: '100%', borderRadius: 99 },
+  ilerlemeSay: { fontSize: 12.5, fontWeight: '800', color: COLORS.text },
+
+  // Adım sol durum dairesi (26px, tutarlı)
+  durumTam: {
     width: 26,
     height: 26,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: COLORS.cardBorder,
+    borderRadius: 99,
+    backgroundColor: COLORS.success,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  adimAd: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  adimAdDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
-  adimMetaSatir: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  adimMeta: { fontSize: 11.5, fontWeight: '600' },
+  durumNext: {
+    width: 26,
+    height: 26,
+    borderRadius: 99,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  durumNextNokta: { width: 9, height: 9, borderRadius: 99 },
+  durumBos: { width: 26, height: 26, borderRadius: 99, borderWidth: 2, borderColor: COLORS.cardBorder },
+
   baslaSolid: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -881,7 +970,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     paddingVertical: 9,
     borderRadius: 11,
-    backgroundColor: COLORS.primaryLight,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '33',
   },
   baslaSoftMetin: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
   ekleSatir: {
@@ -1043,8 +1133,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.cardBorder,
   },
+  // Sıradaki adımı başlat (birincil eylem)
+  baslatBtn: {
+    height: 54,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.32,
+    shadowRadius: 24,
+    elevation: 6,
+  },
+  baslatMetin: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  // Görev tamamlandı bilgi şeridi
+  tamamliSerit: {
+    height: 54,
+    borderRadius: 15,
+    backgroundColor: COLORS.success + '14',
+    borderWidth: 1.5,
+    borderColor: COLORS.success + '55',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+  },
+  tamamliMetin: { fontSize: 16, fontWeight: '800', color: COLORS.success },
+  // Adımsız görevler için yedek tamamlama butonu
   tamamlaBtn: {
-    height: 52,
+    height: 54,
     borderRadius: 15,
     backgroundColor: COLORS.card,
     borderWidth: 1.5,
