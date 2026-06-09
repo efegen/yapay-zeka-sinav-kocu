@@ -18,6 +18,9 @@ export interface Profil {
   hedefNetBilgisi?: Record<string, number>;
   netFetchStatus?: string;
   netFetchRetryCount?: number;
+  toplamSoru?: number;
+  toplamOdakSaat?: number;
+  uyelikTarihi?: string;
 }
 
 export function useProfile() {
