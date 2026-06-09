@@ -2,7 +2,7 @@
 // Kenarlardan boşluklu (floating) bir hap; ortadaki AI Koç sekmesi yukarı taşan
 // gradyan kapsül olarak hiyerarşide öne çıkar.
 import { useRef } from 'react';
-import { View, Text, Pressable, Animated, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Animated, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,11 @@ import { COLORS } from '../constants/colors';
 import { GRADYAN, GRADYAN_BASLANGIC, GRADYAN_BITIS } from './koc/tokens';
 
 type IoniconsAdi = React.ComponentProps<typeof Ionicons>['name'];
+
+// Çubuk yüzen (absolute) olduğundan içeriğin üstüne biner. Ekranlar, son içeriğin
+// çubuğun arkasında kalıcı olarak gizlenmemesi için alt boşluklarına bunu (+ güvenli
+// alan) ekler. Hap yüksekliği + nefes payı.
+export const ALT_CUBUK_BOSLUK = 104;
 
 interface SekmeTanim {
   ad: string; // expo-router rota adı
@@ -31,11 +36,10 @@ const SEKMELER: SekmeTanim[] = [
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Frosted-glass yaklaşımı: expo-blur yok → opak beyaz yedek; web'de backdrop-filter ile gerçek bulanıklık.
-const hapZemin =
-  Platform.OS === 'web'
-    ? ({ backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)' } as any)
-    : null;
+// Opak zemin: saydam pil koyu/yoğun içerik üzerinde okunmuyordu (blur native'de yok,
+// liquid glass Expo Go'da çalışmıyor). Çubuk yine içeriğin üstünde YÜZER, ama pil tam
+// opak beyaz → sekmeler her zeminde net okunur. Yüzen görünümü gölge + kenar verir.
+const hapZemin = { backgroundColor: COLORS.card };
 
 function Sekme({
   tanim,
@@ -107,7 +111,9 @@ export function AltCubuk({ state, descriptors, navigation }: BottomTabBarProps) 
   }
 
   return (
-    <View style={[styles.disSarmal, { paddingBottom: insets.bottom || 22 }]}>
+    // box-none: pilin dışındaki şeffaf boşluk dokunuşları yakalamaz → arkadaki
+    // içerik (çubuğun yanlarındaki/üstündeki alan) tıklanabilir kalır.
+    <View pointerEvents="box-none" style={[styles.disSarmal, { paddingBottom: insets.bottom || 22 }]}>
       <View style={[styles.hap, hapZemin]}>
         {SEKMELER.map((tanim) => {
           const rota = state.routes.find((r) => r.name === tanim.ad);
@@ -134,7 +140,12 @@ export function AltCubuk({ state, descriptors, navigation }: BottomTabBarProps) 
 
 const styles = StyleSheet.create({
   disSarmal: {
-    backgroundColor: COLORS.background,
+    // Yüzen: içeriğin üstüne biner (frosted-glass için içerik arkadan geçer).
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
     paddingHorizontal: 14,
     paddingTop: 16, // yukarı taşan koç kapsülüne nefes alanı (kırpılmayı önler)
   },

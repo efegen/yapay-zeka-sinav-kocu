@@ -27,6 +27,7 @@ import { cikisYap } from '../../services/authService';
 import { manuelSyncHedefNet, denemeleriGetir } from '../../services/firestoreService';
 import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
+import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { bildir } from '../../utils/bildirim';
 
 type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis';
@@ -213,7 +214,7 @@ export default function Profil() {
       {/* ── Kayan içerik ── */}
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={[s.icerik, { paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[s.icerik, { paddingBottom: insets.bottom + ALT_CUBUK_BOSLUK }]}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View

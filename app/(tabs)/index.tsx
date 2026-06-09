@@ -13,8 +13,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfile } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
+import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { YKS_TARIHI, YKS_SEZON_BASLANGIC, YKS_YIL } from '../../constants/sinav';
 import { gunFarki, tarihUzun, aralikOrani } from '../../utils/tarih';
 
@@ -35,6 +37,7 @@ const AYT_ALANLARI: Record<string, string[]> = {
 export default function AnaSayfa() {
   const { profil, yukleniyor } = useProfile();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const bugun = useMemo(() => new Date(), []);
   const tarihMetni = `${GUNLER[bugun.getDay()]} · ${bugun.getDate()} ${AYLAR[bugun.getMonth()]}`;
@@ -92,7 +95,7 @@ export default function AnaSayfa() {
   return (
     <ScrollView
       style={styles.ekran}
-      contentContainerStyle={styles.icerik}
+      contentContainerStyle={[styles.icerik, { paddingBottom: insets.bottom + ALT_CUBUK_BOSLUK }]}
       showsVerticalScrollIndicator={false}
     >
       {/* ─── Başlık ─── */}

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Timestamp } from 'firebase/firestore';
 import { auth } from '../../services/firebaseConfig';
@@ -29,6 +30,7 @@ import { COLORS } from '../../constants/colors';
 import { DERSLER, dersRenk } from '../../constants/dersler';
 import { YKS_TARIHI } from '../../constants/sinav';
 import { Ring } from '../../components/koc/Ring';
+import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { bildir } from '../../utils/bildirim';
 
 const PRIMARY = COLORS.primary;
@@ -105,6 +107,7 @@ const BOŞ_FORM = {
 
 export default function Takvim() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const bugun = useMemo(() => {
     const t = new Date();
     t.setHours(0, 0, 0, 0);
@@ -339,7 +342,7 @@ export default function Takvim() {
         </LinearGradient>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + ALT_CUBUK_BOSLUK }}>
         {/* ─── Takvim paneli: hafta günleri + ızgara + gün özeti tek yüzeyde ─── */}
         <View style={styles.panel}>
           {/* hafta günü başlıkları */}

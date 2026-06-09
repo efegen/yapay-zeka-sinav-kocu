@@ -9,8 +9,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { COLORS } from '../../constants/colors';
+import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { auth } from '../../services/firebaseConfig';
 import { denemeleriGetir, denemeSil } from '../../services/firestoreService';
 import { bildir } from '../../utils/bildirim';
@@ -24,6 +26,7 @@ const KAPSAM_ETIKET: Record<DenemeSonuc['kapsam'], string> = {
 
 export default function Denemeler() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const uid = auth.currentUser?.uid;
   const [denemeler, setDenemeler] = useState<DenemeSonuc[]>([]);
   const [yukleniyor, setYukleniyor] = useState(true);
@@ -110,7 +113,7 @@ export default function Denemeler() {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.liste} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={[styles.liste, { paddingBottom: insets.bottom + ALT_CUBUK_BOSLUK }]} showsVerticalScrollIndicator={false}>
           {denemeler.map((d, i) => {
             // Listede en yeni önce; "önceki" = bir sonraki eleman (daha eski).
             const onceki = denemeler[i + 1];

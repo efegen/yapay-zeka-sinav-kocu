@@ -12,8 +12,10 @@ import {
   FlatList,
 } from 'react-native';
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
+import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { usePlanlar, CalismaPlani, PomodoroSeans } from '../../contexts/PlanContext';
 import { simdi } from '../../utils/tarih';
 
@@ -29,6 +31,7 @@ function onerMolaSuresi(calismaMin: number) {
 }
 
 export default function Pomodoro() {
+  const insets = useSafeAreaInsets();
   // Zamanlayıcı
   const [mod, setMod] = useState<Mod>('calisma');
   const [durum, setDurum] = useState<Durum>('bekliyor');
@@ -199,7 +202,7 @@ export default function Pomodoro() {
   // ── Render ─────────────────────────────────────────────
   return (
     <View style={styles.ekran}>
-      <ScrollView contentContainerStyle={styles.icerik} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.icerik, { paddingBottom: insets.bottom + ALT_CUBUK_BOSLUK }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* Başlık */}
         <View style={styles.baslikRow}>
