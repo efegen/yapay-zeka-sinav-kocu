@@ -1,88 +1,25 @@
 import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../../constants/colors';
-
-type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
-
-function TabIcon({ name, focused }: { name: IoniconsName; focused: boolean }) {
-  return (
-    <Ionicons
-      name={name}
-      size={22}
-      color={focused ? COLORS.primary : COLORS.textLight}
-    />
-  );
-}
+import { AltCubuk } from '../../components/AltCubuk';
 
 export default function TabsLayout() {
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textLight,
-        tabBarStyle: {
-          backgroundColor: COLORS.card,
-          borderTopColor: COLORS.cardBorder,
-          borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
-        },
-      }}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <AltCubuk {...props} />}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Ana Sayfa',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'home' : 'home-outline'} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="takvim"
-        options={{
-          title: 'Takvim',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'calendar' : 'calendar-outline'} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="pomodoro"
-        options={{
-          title: 'Pomodoro',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'timer' : 'timer-outline'} focused={focused} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Ana Sayfa' }} />
+      <Tabs.Screen name="takvim" options={{ title: 'Takvim' }} />
       <Tabs.Screen
         name="ai-koc"
         options={{
           title: 'AI Koç',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'sparkles' : 'sparkles-outline'} focused={focused} />
-          ),
-          // Tam Ekran Sohbet (Çözüm A): sohbet açıkken global alt sekme çubuğunu gizle —
+          // Tam Ekran Sohbet: sohbet açıkken global alt sekme çubuğunu gizle —
           // altta tek çubuk (mesaj girişi) kalsın. Geri için başlıktaki ← butonu kullanılır.
           tabBarStyle: { display: 'none' },
         }}
       />
-      <Tabs.Screen
-        name="profil"
-        options={{
-          title: 'Profil',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'person' : 'person-outline'} focused={focused} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="pomodoro" options={{ title: 'Sayaç' }} />
+      <Tabs.Screen name="profil" options={{ title: 'Profil' }} />
       <Tabs.Screen name="denemeler" options={{ href: null }} />
       <Tabs.Screen name="timer" options={{ href: null }} />
     </Tabs>

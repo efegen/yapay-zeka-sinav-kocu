@@ -24,14 +24,25 @@ export interface OgrenciBaglam {
   hedefNetler?: Record<string, number>;
   gunlukSoruHedefi?: number;
   zorlananKonular?: string[];
+  iyiKonular?: string[];
 }
 
 /**
  * Profilden AI'a gönderilecek bağlamı derler. (Tam kişisel bağlam — isim dahil.)
  * @param zorlananKonular  Koç hafızasından gelen zorlanılan konular (opsiyonel).
+ * @param iyiKonular       Koç hafızasından gelen iyi olunan konular (opsiyonel).
  */
-export function baglamKur(profil: Profil | null, zorlananKonular?: string[]): OgrenciBaglam {
-  if (!profil) return zorlananKonular?.length ? { zorlananKonular } : {};
+export function baglamKur(
+  profil: Profil | null,
+  zorlananKonular?: string[],
+  iyiKonular?: string[]
+): OgrenciBaglam {
+  if (!profil) {
+    const b: OgrenciBaglam = {};
+    if (zorlananKonular?.length) b.zorlananKonular = zorlananKonular;
+    if (iyiKonular?.length) b.iyiKonular = iyiKonular;
+    return b;
+  }
   return {
     isim: profil.isim,
     sinif: profil.sinif,
@@ -43,6 +54,7 @@ export function baglamKur(profil: Profil | null, zorlananKonular?: string[]): Og
     hedefNetler: profil.hedefNetBilgisi,
     gunlukSoruHedefi: profil.gunlukSoruHedefi,
     zorlananKonular: zorlananKonular?.length ? zorlananKonular : undefined,
+    iyiKonular: iyiKonular?.length ? iyiKonular : undefined,
   };
 }
 

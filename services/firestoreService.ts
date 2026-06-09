@@ -16,6 +16,7 @@ import {
   findReferencePrograms,
   HedefNetBilgisi,
 } from './yokatlasService';
+import type { DenemeSonuc } from '../models/deneme';
 
 export type NetFetchStatus = 'pending' | 'done' | 'not_needed' | 'failed';
 
@@ -311,4 +312,38 @@ export const adimlariGuncelle = async (
 export const gorevSil = async (uid: string, gorevId: string): Promise<void> => {
   const gorevRef = doc(db, 'users', uid, 'gorevler', gorevId);
   await deleteDoc(gorevRef);
+};
+
+// ─────────────────────────────────────────────
+// Deneme sonuçları (mock exam results)
+// ─────────────────────────────────────────────
+// Takvimdeki "deneme" görevi (GorevTur = 'deneme') bir takvim olayıdır; buradaki
+// kayıt ise ders bazlı D/Y ve net taşıyan gerçek sonuç kaydıdır. Ayrı koleksiyonda
+// tutulur ki takvim sorgularını kirletmesin.
+
+export const denemeEkle = async (
+  uid: string,
+  deneme: Omit<DenemeSonuc, 'id' | 'olusturmaTarihi'>
+): Promise<string> => {
+  const kolRef = collection(db, 'users', uid, 'denemeler');
+  const ref = await addDoc(kolRef, {
+    ...temizle(deneme as unknown as Record<string, unknown>),
+    olusturmaTarihi: Timestamp.now(),
+  });
+  return ref.id;
+};
+
+// En yeni deneme önce olacak şekilde tüm denemeleri getirir (tek-alan, index gerektirmez).
+export const denemeleriGetir = async (uid: string): Promise<DenemeSonuc[]> => {
+  const kolRef = collection(db, 'users', uid, 'denemeler');
+  const snap = await getDocs(kolRef);
+  return snap.docs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((d) => ({ id: d.id, ...(d.data() as any) }) as DenemeSonuc)
+    .sort((a, b) => (b.tarih?.toMillis() ?? 0) - (a.tarih?.toMillis() ?? 0));
+};
+
+export const denemeSil = async (uid: string, denemeId: string): Promise<void> => {
+  const ref = doc(db, 'users', uid, 'denemeler', denemeId);
+  await deleteDoc(ref);
 };

@@ -22,7 +22,7 @@ import { auth } from '../../services/firebaseConfig';
 import { useProfile } from '../../hooks/useProfile';
 import { useKocHafiza } from '../../hooks/useKocHafiza';
 import { useSohbetler } from '../../hooks/useSohbetler';
-import { konuSinyali, zorlananKonularOzet } from '../../services/kocHafizaService';
+import { konuSinyali, zorlananKonularOzet, iyiKonularOzet } from '../../services/kocHafizaService';
 import { COLORS } from '../../constants/colors';
 import { bildir } from '../../utils/bildirim';
 import { kocaSor, soruyuCoz, baglamKur, AiHatasi } from '../../services/aiService';
@@ -78,7 +78,7 @@ export default function AiKoc() {
 
   /** Güncel profil + hafıza bağlamı. */
   function suankiBaglam() {
-    return baglamKur(profil, zorlananKonularOzet(hafiza));
+    return baglamKur(profil, zorlananKonularOzet(hafiza), iyiKonularOzet(hafiza));
   }
 
   const [girdi, setGirdi] = useState('');

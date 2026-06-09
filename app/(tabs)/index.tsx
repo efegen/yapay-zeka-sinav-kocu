@@ -296,6 +296,16 @@ export default function AnaSayfa() {
               ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Denemelerini ekledikçe tahmini sıralaman burada oluşacak.`
               : 'Denemelerini ekledikçe tahmini sıralaman burada görünecek.'}
           </Text>
+
+          <TouchableOpacity
+            style={styles.denemeCta}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(tabs)/denemeler' as any)}
+          >
+            <Ionicons name="clipboard-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.denemeCtaMetin}>Denemelerim</Text>
+            <Ionicons name="chevron-forward" size={15} color={COLORS.primary} />
+          </TouchableOpacity>
         </View>
       </Yukselen>
 
@@ -507,6 +517,12 @@ const styles = StyleSheet.create({
   siraGovde: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
   siraDeger: { fontSize: 30, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
   siraAlt: { fontSize: 12, fontWeight: '600', color: COLORS.textLight },
+  denemeCta: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    marginTop: 12, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 11,
+    backgroundColor: COLORS.primaryLight,
+  },
+  denemeCtaMetin: { fontSize: 13.5, fontWeight: '700', color: COLORS.primary },
 
   // Yakında rozeti
   yakindaPill: {

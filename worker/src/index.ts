@@ -42,6 +42,7 @@ interface OgrenciBaglam {
   hedefNetler?: Record<string, number>;
   gunlukSoruHedefi?: number;
   zorlananKonular?: string[]; // koç hafızasından (öğrencinin zorlandığı konular)
+  iyiKonular?: string[]; // koç hafızasından (öğrencinin iyi olduğu konular)
 }
 
 interface SohbetMesaji {
@@ -73,6 +74,23 @@ const GECERLI_TIPLER = new Set([
   'oturumZamanPlani', 'sinavCantasi', 'hedefOzeti', 'projeksiyon',
 ]);
 
+/** Sık kartların ZORUNLU alanları dolu mu (yalın prompt'ın olası şema-sadakat kaybını telafi eder). */
+function gecerliKart(tip: string, veri: Record<string, unknown>): boolean {
+  const dolu = (a: unknown) => Array.isArray(a) && a.length > 0;
+  switch (tip) {
+    case 'cozumAdimlari':
+      return dolu(veri.adimlar) && typeof veri.sonuc === 'string';
+    case 'konuAdimlari':
+      return typeof veri.konu === 'string' && dolu(veri.adimlar);
+    case 'formulKarti':
+      return typeof veri.konu === 'string' && dolu(veri.formuller);
+    case 'haftalikPlan':
+      return dolu(veri.gunler);
+    default:
+      return true; // diğer kartlar için tip+veri kontrolü yeterli
+  }
+}
+
 /** Modelin ürettiği kartları doğrular: bilinmeyen tipi/eksik veriyi düşürür, max 2 kart. */
 function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unknown> }[] {
   if (!Array.isArray(ham)) return [];
@@ -83,6 +101,7 @@ function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unkno
     const veri = (k as any).veri;
     if (typeof tip !== 'string' || !GECERLI_TIPLER.has(tip)) continue;
     if (!veri || typeof veri !== 'object' || Array.isArray(veri)) continue;
+    if (!gecerliKart(tip, veri)) continue; // zorunlu alanı eksik kartı düşür
     temiz.push({ tip, veri });
     if (temiz.length >= 2) break; // yanıt başına en fazla 2 kart
   }
@@ -115,6 +134,9 @@ function sistemPromptu(b: OgrenciBaglam): string {
   if (b.zorlananKonular && b.zorlananKonular.length) {
     satirlar.push(`- Zorlandığı konular (hafıza): ${b.zorlananKonular.join(', ')}`);
   }
+  if (b.iyiKonular && b.iyiKonular.length) {
+    satirlar.push(`- İyi olduğu konular (hafıza): ${b.iyiKonular.join(', ')}`);
+  }
   const baglam = satirlar.length ? satirlar.join('\n') : '- (Profil bilgisi henüz yok.)';
 
   return [
@@ -134,6 +156,8 @@ function sistemPromptu(b: OgrenciBaglam): string {
     '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
     '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
     '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
+    '- "İyi olduğu konular"ı (hafıza) gereksiz yere baştan anlatma, kısa geç; "zorlandığı konular"da ise',
+    '  daha temkinli, temelden ve sabırlı açıkla. Bu listeler sana verilmediyse uydurma.',
     '- Öğrenci bir çözümü/konuyu anlamadığını söylerse tüm çözümü baştan DÖKME. Hangi ADIMI/kavramı anlamadığını',
     '  AÇIKÇA belirtmişse (örn. "X adımını anlamadım") tekrar "hangi adım?" diye SORMA; doğrudan YALNIZCA o adımı',
     '  sade, kısa ve NEDEN-li (neden bu işlem yapıldı) açıkla. Belirtmemişse önce kısaca nerede takıldığını sor.',
@@ -142,65 +166,52 @@ function sistemPromptu(b: OgrenciBaglam): string {
   ].join('\n');
 }
 
-// ── Yapılandırılmış çıktı yönergesi (MASTER_PROMPT_REVIZYON.md §3) ──
+// ── Yapılandırılmış çıktı yönergesi ──
 const KART_REHBERI = [
   'ÇIKTI FORMATI:',
-  '- Her yanıtı GEÇERLİ JSON olarak ver: { "yanit": "...", "kartlar": [ { "tip": "...", "veri": {...} } ] }',
-  '- "yanit" her zaman dolu olsun: kartı tanıtan, sıcak, kısa bir cümle. Kartın içeriğini metinde TEKRARLAMA.',
-  '- Vurgu için metin alanlarında **kalın** (markdown) kullanabilirsin. Tek yıldız (*) kullanma.',
-  '- Uygun olduğunda kart üret; genel/duygusal/belirsiz sohbette kart üretme, "kartlar": [] bırak.',
-  '- Bir yanıtta en fazla 2 kart. Kart yığma; en değerli olanı seç.',
+  '- Yanıtı GEÇERLİ JSON ver: { "yanit": "...", "kartlar": [ { "tip": "...", "veri": {...} } ] }',
+  '- "yanit" hep dolu: kartı tanıtan sıcak, kısa cümle — kart içeriğini TEKRARLAMA. Vurgu için **kalın** (tek * yok).',
+  '- En fazla 2 kart, en değerlisini seç. Genel/duygusal/belirsiz sohbette kart üretme ("kartlar": []).',
   '',
   'HAFIZA (opsiyonel, ÇOK TEMKİNLİ):',
-  '- SADECE öğrenci bir konuda AÇIKÇA zorlandığını ("X\'i anlamıyorum/zor geliyor") ya da artık anladığını',
-  '  belirtirse yanıta "hafiza" ekle: "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }',
-  '- Belirsizse, tek seferlik soru çözmede veya sıradan sohbette "hafiza" KOYMA. Şüphedeysen koyma.',
+  '- YALNIZCA öğrenci açıkça zorlandığını ("X\'i anlamıyorum") ya da artık anladığını söylerse ekle:',
+  '  "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }. Şüphedeysen KOYMA.',
   '',
-  'KART SEÇİMİ (kullanıcı niyeti → kart tipi):',
-  '- Plan/program: "pomodoroPlani" (tek oturum) veya "haftalikPlan" (hafta).',
-  '- Bir konuyu ÖĞRETME ("anlamıyorum"/"anlat"/"sıfırdan"): açıklamayı "yanit"a yaz (+ "formulKarti"/"ipucu") — konuAdimlari DEĞİL.',
-  '- Konu ÇALIŞMA PLANI ("nasıl çalışırım"): "konuAdimlari" (kısa eylem adımları).',
-  '- Çözülecek ya da senin ürettiğin örnek soru: "cozumAdimlari" (+ "ipucu").',
-  '- Formül/özet: "formulKarti".',
-  '- Deneme sonucu paylaşılınca: "denemeKiyasi" + "enBuyukKazanc".',
-  '- Moral/motivasyon: "momentum" + "molaRecetesi".',
-  '- Sınav günü/strateji: "oturumZamanPlani" + "sinavCantasi".',
-  '- Hedefe uzaklık/"yetişir mi": "hedefOzeti" + "projeksiyon".',
+  'KART SEÇİMİ (niyet → tip):',
+  '- Konu ÖĞRETME ("anlat"/"anlamıyorum"/"sıfırdan"): açıklama "yanit"a (+ "formulKarti"/"ipucu") — konuAdimlari DEĞİL.',
+  '- Konu ÇALIŞMA PLANI ("nasıl çalışırım"): "konuAdimlari". · Çözülecek/ürettiğin örnek soru: "cozumAdimlari" (+ "ipucu").',
+  '- Plan: "pomodoroPlani" (oturum) / "haftalikPlan" (hafta). · Formül/özet: "formulKarti". · Moral: "momentum" + "molaRecetesi".',
+  '- Deneme sonucu: "denemeKiyasi" + "enBuyukKazanc". · Sınav günü: "oturumZamanPlani" + "sinavCantasi". · "Yetişir mi": "hedefOzeti" + "projeksiyon".',
   '',
-  'ÖĞRETME & ALIŞTIRMA (öğreticilik en önemli iş):',
-  '- Öğrenci bir konuyu anlamadığını söyler/öğretmeni isterse o konuyu GERÇEKTEN ÖĞRET: "yanit"ta sıcak,',
-  '  sade, günlük örnekli bir dille AÇIKLA (gerekirse **kalın**). Açıklamayı "konuAdimlari" checklist\'ine',
-  '  (işaretlenecek maddelere) BÖLME — bu öğretmez; akıcı, paragraf paragraf anlat.',
-  '- "yanit" düz metni LaTeX RENDER ETMEZ: formülleri "formulKarti"na koy (LaTeX ile) ya da sözel söyle',
-  '  ("x\'in karesinin türevi 2x"). "yanit" içine $...$ / \\frac gibi LaTeX yazma.',
-  '- "konuAdimlari" YALNIZCA çalışma yol haritasıdır: adimlar = öğrencinin yapacağı KISA eylemler (~6 kelime,',
-  '  örn. "Kavramı videodan izle", "Temel 10 soru çöz", "Formülleri tekrar et"). Madde içine tanım/açıklama/',
-  '  LaTeX/matematik KOYMA. En çok TEK aksiyon ekle ve bu bir alıştırma CTA\'sı olsun.',
-  '- Öğrenci örnek/alıştırma sorusu isterse o konudan YENİ bir soru ÜRET ve "cozumAdimlari" ile çöz. Soru',
-  '  senin ürettiğin, ekranda başka yerde GÖRÜNMEYEN bir sorudur → soruyu "giris" alanına AÇIKÇA yaz',
-  '  (matematik LaTeX ile). Öğrenci önce kendi denesin diye adımları KAPALI başlat: "acikAdim": -1.',
+  'ÖĞRETME & ALIŞTIRMA (en önemli iş):',
+  '- Bir konuyu öğretirken "yanit"ta sıcak, sade, günlük örnekli, paragraf paragraf AÇIKLA — checklist\'e BÖLME',
+  '  (konuAdimlari öğretmez). "konuAdimlari" yalnızca yol haritası: adimlar = KISA eylemler (~6 kelime, "Kavramı',
+  '  videodan izle", "Temel 10 soru çöz") — tanım/açıklama/LaTeX KOYMA; en çok 1 aksiyon (alıştırma CTA\'sı).',
+  '- "yanit" LaTeX RENDER ETMEZ: formülü "formulKarti"na (LaTeX) koy ya da sözel söyle ("x karenin türevi 2x");',
+  '  "yanit" içine $...$ / \\frac yazma.',
+  '- Örnek/alıştırma sorusu istenirse o konudan YENİ soru ÜRET, "cozumAdimlari" ile çöz: soru ekranda görünmez →',
+  '  "giris"e açıkça yaz (LaTeX). Öğrenci önce denesin diye adımları kapalı başlat ("acikAdim": -1).',
+  '- Bir matematik çözümünü (ürettiğin ya da sorulan) EMIT ETMEDEN ÖNCE sonucu kendin DOĞRULA (yerine koy/mantık',
+  '  kontrolü). Emin değilsen uydurma; öğrenciye soruyu fotoğrafla göndermesini öner (daha güçlü çözüm hattı).',
   '',
-  'VERİ DÜRÜSTLÜĞÜ (en kritik kural):',
-  '- "momentum", "denemeKiyasi", "hedefOzeti", "projeksiyon", "baglamSeridi", "miniDenemeAnalizi" kartları',
-  '  GEÇMİŞ VERİ ister. Bu veri sana bağlamda VERİLDİYSE kullan; VERİLMEDİYSE bu kartları UYDURMA —',
-  '  bunun yerine "yanit" içinde öğrenciden veriyi iste (örn. son deneme netlerini yaz).',
-  '- Net, sıra, süre gibi sayıları asla tahmin edip kart alanına yazma. Yalnızca bağlamdaki değerleri kullan.',
+  'VERİ DÜRÜSTLÜĞÜ (en kritik):',
+  '- "momentum", "denemeKiyasi", "hedefOzeti", "projeksiyon", "baglamSeridi", "miniDenemeAnalizi" GEÇMİŞ VERİ ister:',
+  '  bağlamda verildiyse kullan; verilmediyse UYDURMA, "yanit"ta öğrenciden iste (örn. son deneme netleri).',
+  '- Net/sıra/süre sayılarını asla tahmin edip karta yazma; yalnızca bağlamdaki değerleri kullan.',
   '',
-  'KART ŞEMALARI (veri alanları — tam olarak bu adları kullan):',
+  'KART ŞEMALARI (alan adlarını TAM kullan):',
   '- pomodoroPlani: { baslik, ozet, bloklar:[{sure,ders,tip:"odak"|"mola",renk?}], cta?:{etiket,aksiyon:"pomodoro"} }',
-  '- konuAdimlari: { konu, adimlar:[KISA eylem metni — tanım/LaTeX YOK], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] (en çok 1, alıştırma CTA\'sı) }',
+  '- konuAdimlari: { konu, adimlar:[KISA eylem — tanım/LaTeX YOK], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] (en çok 1, alıştırma CTA\'sı) }',
   '- miniDenemeAnalizi: { baslik, dersler:[{ad,net,max,renk}], icgoru }',
-  '- cozumAdimlari: { giris, adimlar:[{ad,detay}], sonuc, acikAdim? } (giris: öğrenci soruyu VERDİYSE tekrarlama; SEN ürettiysen soruyu giris\'e yaz)',
+  '- cozumAdimlari: { giris, adimlar:[{ad,detay}], sonuc, acikAdim? } (giris: öğrenci soruyu verdiyse tekrarlama; SEN ürettiysen soruyu giris\'e yaz)',
   '- ipucu: { baslik, metin }',
   '- momentum: { baslik, altBaslik?, metrikler:[{deger,etiket,icon,renk}], not? }',
   '- molaRecetesi: { baslik, altBaslik?, ogeler:[{icon,metin}], cta?:{etiket,aksiyon:"pomodoro"} }',
   '- denemeKiyasi: { baslik, altBaslik?, dersler:[{ad,net,max,onceki,renk}], toplamNet:{deger,fark}, tahminiSira?:{deger,yon:"yukari"|"asagi"|"sabit"} }',
   '- enBuyukKazanc: { ders, yuzde(0-100), renk, metin, cta?:{etiket,aksiyon:"plan"} }',
   '- haftalikPlan: { baslik, ozet, tarihAraligi?, gunler:[{gun,odak,sure,renk,bugun?,isler:[metin]}], cta?:{etiket,aksiyon:"takvim"} }',
-  '    · gun: TAM Türkçe gün adı ("Pazartesi".."Pazar") — takvime doğru tarihe eşlenir.',
-  '    · sure: o günün TOPLAM çalışma süresi, BİRİMLİ yaz ("120 dk" / "2 saat") — çıplak sayı yazma.',
-  '    · odak: günün ana ders/konusu (kısa). isler: o günün alt görevleri (takvime ADIM olarak aktarılır).',
-  '    · cta.etiket "Takvime ekle" olsun — dokununca plan takvime görev olarak eklenir.',
+  '    · gun: TAM Türkçe gün adı ("Pazartesi".."Pazar"). sure: günün TOPLAM süresi BİRİMLİ ("120 dk"/"2 saat", çıplak sayı yok).',
+  '    · odak: ana ders/konu (kısa). isler: alt görevler (takvime adım olur). cta.etiket "Takvime ekle".',
   '- formulKarti: { ders, konu, formuller:[{sol,sag,not?}], altinKural?, kaydedilebilir? }',
   '- oturumZamanPlani: { baslik, altBaslik?, dagilim:[{ad,dk,renk}], altinKural? }',
   '- sinavCantasi: { baslik, altBaslik?, maddeler:[metin], tamamlanan?:[index] }',
@@ -208,10 +219,10 @@ const KART_REHBERI = [
   '- projeksiyon: { baslik, altBaslik?, barlar:[{etiket,deger,yukseklik(0-100),tip:"notr"|"ara"|"hedef"}], sonuc:{durum:"yetisir"|"riskli"|"yetismez",metin} }',
   '',
   'RENKLER: yalnızca #7C3AED (mor), #EC4899 (pembe), #10B981 (yeşil), #F59E0B (turuncu), #94A3B8 (nötr).',
-  'ICON adları: timer, book, trendUp, calendar, clock, shield, target, moon, bolt, flame, pencil.',
-  'MATEMATİK: cozumAdimlari ("detay","sonuc") ve formulKarti içindeki matematik ifadelerini LaTeX ile yaz',
-  '($...$ satır içi, $$...$$ blok; kesir \\frac{pay}{payda}, üs x^2, kök \\sqrt{}). Düz "a/b" yazma.',
-  'Çok satırlı denklem için $$\\begin{aligned} a &= b \\\\ &= c \\end{aligned}$$ kullan — \\begin{aligned} MUTLAKA $$...$$ içinde olsun.',
+  'ICON: timer, book, trendUp, calendar, clock, shield, target, moon, bolt, flame, pencil.',
+  'MATEMATİK: cozumAdimlari ("detay","sonuc") ve formulKarti matematiğini LaTeX yaz ($...$ satır içi, $$...$$ blok;',
+  'kesir \\frac{pay}{payda}, üs x^2, kök \\sqrt{}; düz "a/b" yok). Çok satır: $$\\begin{aligned} a &= b \\\\ &= c \\end{aligned}$$',
+  '(\\begin{aligned} MUTLAKA $$...$$ içinde).',
 ].join('\n');
 // ════════════════════════════════════════════════════════════════════
 
@@ -243,8 +254,10 @@ const SORU_PROMPT = [
   '  şıklı soruda doğru şıkkı yaz.',
   '- "adimlar[].ad" KISA, düz Türkçe başlık olsun (LaTeX/$ KOYMA). Matematik yalnızca "detay" ve "sonuc"ta.',
   '- Metinde GERÇEK satır sonu kullan; "\\n" gibi kaçış dizilerini düz metin olarak YAZMA.',
-  '- Çözmeden önce verilenleri dikkatle oku; işlemleri ve nihai sonucu bir kez KONTROL ET. Acele etme.',
-  '- UYDURMA: göremediğin değeri tahmin etme. Emin değilsen durum="bulanik".',
+  '- Çözmeden önce verilenleri dikkatle oku. Çözümü bitirince nihai cevabı DOĞRULA: bulduğun sonucu',
+  '  soruda yerine koy ya da mertebe/birim/mantık kontrolü yap. Tutmuyorsa adımları gözden geçir, acele etme.',
+  '- DÜRÜSTLÜK: göremediğin bir değeri ya da emin olmadığın bir adımı UYDURMA. Soruyu güvenle çözemiyorsan',
+  '  durum="bulanik" ver ya da yanıt içinde netlik iste — yanlış/uydurma bir çözüm vermektense bunu yap.',
   '',
   'MATEMATİK BİÇİMİ (çok önemli — öğrenci için okunaklı olmalı):',
   '- Tüm matematiksel ifadeleri LaTeX ile yaz. Satır içi: $...$, ayrı satır/blok: $$...$$.',
@@ -274,11 +287,13 @@ const SORU_PROMPT = [
 // Triyaj: soruyu ÇÖZMEDEN sınıflandır (hangi modele yönlendireceğimizi belirler).
 const TRIAGE_PROMPT = [
   'Sana bir soru FOTOĞRAFI verilir. SORUYU ÇÖZME. Sadece sınıflandır ve YALNIZCA şu JSON\'u döndür:',
-  '{ "soruVar": true/false, "okunabilir": true/false, "zorluk": "kolay"|"orta"|"zor", "konu": "Ders · Konu" }',
+  '{ "soruVar": true/false, "okunabilir": true/false, "zorluk": "kolay"|"orta"|"zor", "emin": true/false, "konu": "Ders · Konu" }',
   '- soruVar: görselde gerçek bir akademik soru var mı.',
   '- okunabilir: soru metni net okunuyor mu (bulanık/karanlık/kesik değilse true).',
   '- zorluk ölçütü: tek işlem/tek adım → "kolay"; 2-3 kavram/adım → "orta";',
   '  çok adımlı, bileşik fonksiyon, türev/integral zinciri, ispat, karmaşık geometri → "zor".',
+  '- emin: zorluğu güvenle kestirebiliyorsan true; en ufak tereddütte false. (false isek daha güçlü',
+  '  modele yükseltiriz — yanlış cevaptansa biraz fazla güçlü model tercih edilir.)',
   '- konu: kısa tahmin (örn. "AYT Matematik · Limit"). Emin değilsen boş bırak.',
   'Kısa ve hızlı ol; çözüm/aciklama üretme.',
 ].join('\n');
@@ -321,13 +336,16 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   });
 }
 
-/** Görsel içeren OpenAI kullanıcı mesajı oluşturur. */
-function gorselMesaji(dataUrl: string, metin: string) {
+/**
+ * Görsel içeren OpenAI kullanıcı mesajı oluşturur.
+ * detail: triyaj sadece sınıflandırdığı için 'low' (çok daha az vision tokenı); çözüm 'auto' (tam).
+ */
+function gorselMesaji(dataUrl: string, metin: string, detail: 'low' | 'high' | 'auto' = 'auto') {
   return {
     role: 'user',
     content: [
       { type: 'text', text: metin },
-      { type: 'image_url', image_url: { url: dataUrl } },
+      { type: 'image_url', image_url: { url: dataUrl, detail } },
     ],
   };
 }
@@ -364,7 +382,7 @@ async function triajla(
   const model = env.VISION_MODEL_TRIAGE || VARSAYILAN_TRIAGE;
   const oa = await openAiTamamla(env, {
     model,
-    messages: [{ role: 'system', content: TRIAGE_PROMPT }, gorselMesaji(dataUrl, 'Bu soruyu sınıflandır (ÇÖZME).')],
+    messages: [{ role: 'system', content: TRIAGE_PROMPT }, gorselMesaji(dataUrl, 'Bu soruyu sınıflandır (ÇÖZME).', 'low')],
     max_completion_tokens: 400,
   });
   if (oa.hata) return {}; // triyaj başarısız → orta seviye varsayımıyla devam et
@@ -375,7 +393,16 @@ async function triajla(
   if (c.okunabilir === false) {
     return { durum: 'bulanik', yanit: 'Fotoğraf net değil — daha aydınlık ve yakından tekrar çeker misin?' };
   }
-  const zorluk = c.zorluk === 'kolay' || c.zorluk === 'zor' ? c.zorluk : 'orta';
+  const hamZorluk = c.zorluk === 'kolay' || c.zorluk === 'zor' ? c.zorluk : 'orta';
+  // Doğruluk önceliği: triyaj tereddütteyse (emin=false) bir üst basamağa yükselt. Ayrıca "kolay"a
+  // YALNIZCA emin=true ise güven — böylece zor bir soru reasoning'siz zayıf modele asla düşmez;
+  // sınırdakiler reasoning'li gpt-5-mini'ye (orta) gider. Fazla güçlü model, yanlış cevaptan iyidir.
+  let zorluk = hamZorluk;
+  if (c.emin === false) {
+    zorluk = hamZorluk === 'kolay' ? 'orta' : 'zor';
+  } else if (c.emin !== true && hamZorluk === 'kolay') {
+    zorluk = 'orta';
+  }
   return { zorluk, konu: typeof c.konu === 'string' ? c.konu : '' };
 }
 
@@ -402,9 +429,17 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
 
   // 2) Zorluğa göre çözücü seç (kolay→gpt-4.1, orta→gpt-5-mini, zor→gpt-5).
   const { model, tavan, reasoning } = cozucuSec(env, triaj.zorluk);
-  const istek = not
-    ? `Bu fotoğraftaki YKS sorusunu çöz. Öğrencinin notu/isteği: "${not}" — buna da dikkat et.`
-    : 'Bu fotoğraftaki YKS sorusunu çöz.';
+  // Talimatı modelin gücüyle hizala: zorda tüm adımları + doğrulamayı zorla, kolayda kısa tut.
+  const zorlukNotu =
+    triaj.zorluk === 'zor'
+      ? ' Bu soru ZOR sınıflandırıldı: tüm ara adımları göster, acele etme, sonucu MUTLAKA doğrula.'
+      : triaj.zorluk === 'kolay'
+      ? ' Kısa ve net tut; yine de nihai sonucu bir kez kontrol et.'
+      : ' Adımları net göster ve nihai sonucu kontrol et.';
+  const istek =
+    (not
+      ? `Bu fotoğraftaki YKS sorusunu çöz. Öğrencinin notu/isteği: "${not}" — buna da dikkat et.`
+      : 'Bu fotoğraftaki YKS sorusunu çöz.') + zorlukNotu;
   const oa = await openAiTamamla(env, {
     model,
     messages: [{ role: 'system', content: SORU_PROMPT }, gorselMesaji(dataUrl, istek)],
@@ -423,6 +458,11 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
     konu: typeof cikti.konu === 'string' ? cikti.konu : triaj.konu ?? '',
     kartlar: durum === 'cozuldu' ? temizleKartlar(cikti.kartlar) : [],
   });
+}
+
+/** gpt-5* ve o-serisi reasoning modelidir; bunlar özel temperature kabul etmez (default 1 zorunlu). */
+function reasoningModel(model: string, reasoning_effort?: ReasoningSeviye): boolean {
+  return reasoning_effort !== undefined || /^(gpt-5|o\d)/.test(model);
 }
 
 /** OpenAI chat/completions çağrısı (JSON çıktı). Ortak hata yönetimi. */
@@ -446,8 +486,11 @@ async function openAiTamamla(
       },
       body: JSON.stringify({
         ...payload,
-        // Yeni model uyumu: max_tokens yerine max_completion_tokens; temperature gönderilmez.
+        // Yeni model uyumu: max_tokens yerine max_completion_tokens.
         // reasoning_effort undefined ise JSON.stringify onu otomatik atar (reasoning olmayan modeller).
+        // Reasoning'siz modellerde (gpt-4.1*) düşük temperature → aritmetik kararlılık (token-nötr
+        // doğruluk kazancı); gpt-5*/o* özel temperature kabul etmediğinden onlara GÖNDERİLMEZ.
+        ...(reasoningModel(payload.model, payload.reasoning_effort) ? {} : { temperature: 0.2 }),
         response_format: { type: 'json_object' },
       }),
     });

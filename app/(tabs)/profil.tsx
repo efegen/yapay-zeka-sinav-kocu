@@ -29,7 +29,7 @@ import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
 import { bildir } from '../../utils/bildirim';
 
-type AktifModal = null | 'sifre' | 'bildirim' | 'kvkk' | 'hesapSil' | 'cikis';
+type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis';
 
 const SEP = 'rgba(60,60,67,0.1)';
 const ACCENT_LIGHT = '#FCE7F3';
@@ -228,7 +228,6 @@ export default function Profil() {
             <AyarlarSekme
               profil={profil}
               onSifre={() => setAktifModal('sifre')}
-              onBildirim={() => setAktifModal('bildirim')}
               onKvkk={() => setAktifModal('kvkk')}
               onCikis={() => setAktifModal('cikis')}
               onHesapSil={() => setAktifModal('hesapSil')}
@@ -258,24 +257,6 @@ export default function Profil() {
                 : <Text style={s.onayMetin}>Güncelle</Text>}
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-
-      {/* ── Bildirim ayarları modal ── */}
-      <Modal visible={aktifModal === 'bildirim'} transparent animationType="slide" statusBarTranslucent>
-        <Pressable style={s.overlay} onPress={modalKapat} />
-        <View style={s.altSheet}>
-          <View style={s.tutamac} />
-          <Text style={s.sheetBaslik}>Bildirim Ayarları</Text>
-          <View style={s.modalBilgi}>
-            <Ionicons name="notifications-outline" size={32} color={COLORS.primary} />
-            <Text style={s.modalBilgiMetin}>
-              Bildirim tercihleri yakında bu ekrandan yönetilebilecek.
-            </Text>
-          </View>
-          <TouchableOpacity style={[s.onayBtn, { marginTop: 8 }]} onPress={modalKapat} activeOpacity={0.8}>
-            <Text style={s.onayMetin}>Tamam</Text>
-          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -469,11 +450,10 @@ function GenelSekme({
 // ─── Ayarlar sekmesi ─────────────────────────────────────────────────────────
 
 function AyarlarSekme({
-  profil, onSifre, onBildirim, onKvkk, onCikis, onHesapSil,
+  profil, onSifre, onKvkk, onCikis, onHesapSil,
 }: {
   profil: ProfilType | null;
   onSifre: () => void;
-  onBildirim: () => void;
   onKvkk: () => void;
   onCikis: () => void;
   onHesapSil: () => void;
@@ -481,8 +461,6 @@ function AyarlarSekme({
   return (
     <View>
       <Group header="Tercihler">
-        <Row icon="notifications-outline" etiket="Bildirim Ayarları" chevron onPress={onBildirim} />
-        <Row icon="moon-outline" etiket="Görünüm" deger="Açık" chevron />
         <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron son />
       </Group>
 
