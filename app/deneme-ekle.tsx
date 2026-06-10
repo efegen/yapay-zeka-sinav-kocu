@@ -7,6 +7,8 @@ import {
   TextInput,
   TouchableOpacity,
   Platform,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -120,6 +122,10 @@ export default function DenemeEkle() {
   }, [profil?.hedefNetBilgisi, profil?.netFetchStatus, aktifTYT, alan]);
 
   const kalan = hedef != null ? Math.max(0, hedef - net) : null;
+
+  // Web'de <input type="date"> için "YYYY-MM-DD" (yerel saat, gün kayması olmadan).
+  const isoYerel = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   function girisDegistir(ders: string, key: 'd' | 'y', raw: string, soru: number, other: string) {
     setCevap((c) => setDY(c, ders, key, raw, soru, other));
@@ -239,7 +245,12 @@ export default function DenemeEkle() {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.icerik} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.icerik}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
         {/* Künye */}
         <View>
           <View style={styles.etiketRow}>
@@ -267,15 +278,45 @@ export default function DenemeEkle() {
         <View style={styles.ikiliRow}>
           <View style={{ flex: 1.4 }}>
             <Text style={styles.etiket}>Tarih</Text>
-            <TouchableOpacity
-              style={styles.girisKart}
-              activeOpacity={0.85}
-              onPress={() => setTarihSeciciAcik(true)}
-            >
-              <Ionicons name="calendar-outline" size={17} color={COLORS.primary} />
-              <Text style={styles.kartMetin}>{tarihKisa(tarih)}</Text>
-              <Ionicons name="chevron-forward" size={15} color={COLORS.textLight} />
-            </TouchableOpacity>
+            {Platform.OS === 'web' ? (
+              // Web: tarayıcının yerel tarih girişi (takvim güvenilir açılır).
+              <View style={styles.girisKart}>
+                <Ionicons name="calendar-outline" size={17} color={COLORS.primary} />
+                <input
+                  type="date"
+                  value={isoYerel(tarih)}
+                  max={isoYerel(new Date())}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    const [y, m, d] = v.split('-').map(Number);
+                    setTarih(new Date(y, m - 1, d));
+                  }}
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    padding: 0,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    fontFamily: 'inherit',
+                    color: COLORS.text,
+                    colorScheme: 'light',
+                  }}
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.girisKart}
+                activeOpacity={0.85}
+                onPress={() => setTarihSeciciAcik(true)}
+              >
+                <Ionicons name="calendar-outline" size={17} color={COLORS.primary} />
+                <Text style={styles.kartMetin}>{tarihKisa(tarih)}</Text>
+                <Ionicons name="chevron-forward" size={15} color={COLORS.textLight} />
+              </TouchableOpacity>
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.etiket}>Süre</Text>
@@ -293,15 +334,16 @@ export default function DenemeEkle() {
           </View>
         </View>
 
-        {tarihSeciciAcik && Platform.OS !== 'web' && (
+        {/* Android: yerel tarih iletişim kutusu (seçince kapanır) */}
+        {tarihSeciciAcik && Platform.OS === 'android' && (
           <DateTimePicker
             value={tarih}
             mode="date"
-            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            display="default"
             maximumDate={new Date()}
-            onChange={(_, secilen) => {
+            onChange={(e, secilen) => {
               setTarihSeciciAcik(false);
-              if (secilen) setTarih(secilen);
+              if (e.type === 'set' && secilen) setTarih(secilen);
             }}
           />
         )}
@@ -389,6 +431,43 @@ export default function DenemeEkle() {
           {testler.map((k) => satirRender(k))}
         </View>
       </ScrollView>
+
+      {/* iOS: alttan açılan Türkçe takvim — görünürlük yalnızca state'e bağlı,
+          onChange tarihi günceller ama kapatmaz (güvenilir yeniden açılır) */}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={tarihSeciciAcik}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setTarihSeciciAcik(false)}
+        >
+          <Pressable style={styles.tarihArka} onPress={() => setTarihSeciciAcik(false)}>
+            <Pressable style={styles.tarihSheet}>
+              <View style={styles.tarihTutamac} />
+              <View style={styles.tarihSheetBaslik}>
+                <Text style={styles.tarihSheetTitle}>Tarih seç</Text>
+                <TouchableOpacity onPress={() => setTarihSeciciAcik(false)} hitSlop={10}>
+                  <Text style={styles.tarihSheetTamam}>Tamam</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={tarih}
+                mode="date"
+                display="inline"
+                locale="tr-TR"
+                themeVariant="light"
+                accentColor={COLORS.primary}
+                maximumDate={new Date()}
+                onChange={(_, secilen) => {
+                  if (secilen) setTarih(secilen);
+                }}
+                style={styles.tarihPicker}
+              />
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {/* Yapışkan sonuç barı + kaydet */}
       <View style={styles.footer}>
@@ -561,4 +640,16 @@ const styles = StyleSheet.create({
     shadowColor: COLORS.primary, shadowOpacity: 0.32, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8,
   },
   kaydetMetin: { fontSize: 16, fontWeight: '800', color: '#fff' },
+
+  // Tarih seçici sayfası (iOS)
+  tarihArka: { flex: 1, backgroundColor: 'rgba(15,18,40,0.45)', justifyContent: 'flex-end' },
+  tarihSheet: {
+    backgroundColor: COLORS.card, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28,
+  },
+  tarihTutamac: { alignSelf: 'center', width: 40, height: 4, borderRadius: 99, backgroundColor: COLORS.cardBorder, marginBottom: 10 },
+  tarihSheetBaslik: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  tarihSheetTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
+  tarihSheetTamam: { fontSize: 15, fontWeight: '800', color: COLORS.primary },
+  tarihPicker: { alignSelf: 'stretch' },
 });
