@@ -9,7 +9,7 @@ import {
   Easing,
   Platform,
 } from 'react-native';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -38,6 +38,44 @@ export default function AnaSayfa() {
   const { profil, yukleniyor } = useProfile();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  const SOR_SORULARI = [
+    'Limit nasıl çalışılır?',
+    'Türev ile integral farkı?',
+    'Osmanlı neden çöktü?',
+    'TYT mat nasıl biter?',
+    'Paragraf nasıl çözülür?',
+    'Kimyasal bağlar nelerdir?',
+    'Trig formülleri nelerdir?',
+    'İklim çeşitleri nelerdir?',
+    'Felsefe AYT konuları neler?',
+    'Günde kaç saat çalışayım?',
+    'Zayıf ders nasıl çalışılır?',
+    'Biyoloji hücre özeti ver',
+  ];
+
+  const [sorIdx, setSorIdx] = useState(0);
+  const sorOpasit = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const dongu = setInterval(() => {
+      Animated.timing(sorOpasit, {
+        toValue: 0,
+        duration: 500,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start(() => {
+        setSorIdx(prev => (prev + 1) % SOR_SORULARI.length);
+        Animated.timing(sorOpasit, {
+          toValue: 1,
+          duration: 350,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 4000);
+    return () => clearInterval(dongu);
+  }, []);
 
   const bugun = useMemo(() => new Date(), []);
   const tarihMetni = `${GUNLER[bugun.getDay()]} · ${bugun.getDate()} ${AYLAR[bugun.getMonth()]}`;
@@ -126,7 +164,7 @@ export default function AnaSayfa() {
         <TouchableOpacity
           style={styles.sorCubugu}
           activeOpacity={0.85}
-          onPress={() => router.push('/(tabs)/ai-koc' as any)}
+          onPress={() => router.push({ pathname: '/(tabs)/ai-koc' as any, params: { soru: SOR_SORULARI[sorIdx] } })}
         >
           <LinearGradient
             colors={[COLORS.primary, COLORS.accent]}
@@ -137,7 +175,7 @@ export default function AnaSayfa() {
             <Ionicons name="sparkles" size={15} color="#fff" />
           </LinearGradient>
           <Text style={styles.sorMetin} numberOfLines={1}>
-            AI Koç’a sor: <Text style={styles.sorMetinVurgu}>“Limit nasıl çalışılır?”</Text>
+            AI Koç’a sor: <Animated.Text style={[styles.sorMetinVurgu, { opacity: sorOpasit }]}>“{SOR_SORULARI[sorIdx]}”</Animated.Text>
           </Text>
           <View style={styles.sorGonder}>
             <Ionicons name="arrow-forward" size={16} color="#fff" />

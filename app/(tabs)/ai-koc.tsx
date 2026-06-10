@@ -14,7 +14,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -81,7 +81,12 @@ export default function AiKoc() {
     return baglamKur(profil, zorlananKonularOzet(hafiza), iyiKonularOzet(hafiza));
   }
 
+  const { soru: paramSoru } = useLocalSearchParams<{ soru?: string }>();
   const [girdi, setGirdi] = useState('');
+
+  useEffect(() => {
+    if (paramSoru) setGirdi(Array.isArray(paramSoru) ? paramSoru[0] : paramSoru);
+  }, [paramSoru]);
   const [yaziyor, setYaziyor] = useState(false);
   const [kaynakModal, setKaynakModal] = useState(false);
   const [cekmece, setCekmece] = useState(false);
