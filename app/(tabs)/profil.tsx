@@ -45,6 +45,11 @@ function puanTuruTam(tur?: string) {
   return tur ? (map[tur] ?? tur) : '';
 }
 
+function sinifTam(sinif?: string) {
+  if (!sinif) return '—';
+  return sinif === 'mezun' ? 'Mezun' : `${sinif}. Sınıf`;
+}
+
 // ─── Ana bileşen ────────────────────────────────────────────────────────────
 
 export default function Profil() {
@@ -178,8 +183,8 @@ export default function Profil() {
           </View>
           <Text style={s.isim}>{profil?.isim ?? '—'}</Text>
           <Text style={s.altyazi}>
-            {profil?.sinif ? `${profil.sinif}. Sınıf` : '—'}
-            {profil?.puanTuru ? ` · ${profil.puanTuru} ${puanTuruTam(profil.puanTuru)}` : ''}
+            {sinifTam(profil?.sinif)}
+            {profil?.puanTuru ? ` · ${puanTuruTam(profil.puanTuru)}` : ''}
           </Text>
         </View>
 
@@ -431,7 +436,7 @@ function GenelSekme({
 
       {/* Hesap */}
       <Group header="Hesap">
-        <Row icon="school-outline" etiket="Sınıf" deger={profil?.sinif ? `${profil.sinif}. Sınıf` : '—'} />
+        <Row icon="school-outline" etiket="Sınıf" deger={sinifTam(profil?.sinif)} />
         <Row
           icon="trophy-outline"
           etiket="Puan Türü"
@@ -617,8 +622,8 @@ function Row({
       <View style={[s.rowIkon, { backgroundColor: danger ? ERROR_LIGHT : COLORS.primaryLight }]}>
         <Ionicons name={icon} size={16} color={danger ? COLORS.error : COLORS.primary} />
       </View>
-      <Text style={[s.rowEtiket, danger && { color: COLORS.error }]}>{etiket}</Text>
-      {deger && <Text style={s.rowDeger} numberOfLines={1}>{deger}</Text>}
+      <Text style={[s.rowEtiket, deger != null && s.rowEtiketAuto, danger && { color: COLORS.error }]}>{etiket}</Text>
+      {deger && <Text style={s.rowDeger}>{deger}</Text>}
       {chevron && <Ionicons name="chevron-forward" size={15} color={COLORS.textLight} />}
     </View>
   );
@@ -797,9 +802,12 @@ const s = StyleSheet.create({
   rowBorder: { borderBottomWidth: 1, borderBottomColor: SEP },
   rowIkon: { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
   rowEtiket: { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },
+  // Değer içeren satırda etiket içerik genişliğinde kalır; değer esner ve sarar.
+  rowEtiketAuto: { flex: 0 },
   rowDeger: {
+    flex: 1,
     fontSize: 13, color: COLORS.textSecondary, fontWeight: '500',
-    maxWidth: '54%', textAlign: 'right',
+    textAlign: 'right',
   },
 
   // Hedef netler
@@ -807,7 +815,7 @@ const s = StyleSheet.create({
   netYilMetin: { fontSize: 11, color: COLORS.textLight, marginBottom: 8 },
   netSatir: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   netBolumEtiket: { fontSize: 10.5, fontWeight: '700', color: COLORS.textLight, width: 54, flexShrink: 0 },
-  netChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  netChipRow: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   netChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4,
