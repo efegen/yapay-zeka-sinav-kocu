@@ -17,22 +17,47 @@ interface FormulProps {
   boyut?: number;
   kalin?: boolean;
   hizala?: 'left' | 'center';
+  /** İçeriğin tamamı tek bir matematik ifadesi (formül kartı sol/sağ). $ yoksa bütünü sarar. */
+  tamMat?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
-// İç bileşenler: renk/boyut/hizala çözülmüş (zorunlu), kalin opsiyonel.
+// İç bileşenler: renk/boyut/hizala çözülmüş (zorunlu), kalin/tamMat opsiyonel.
 interface IcFormulProps {
   icerik: string;
   renk: string;
   boyut: number;
   kalin?: boolean;
   hizala: 'left' | 'center';
+  tamMat?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
-/** Metinde matematik (\, $) işareti var mı? Yoksa düz Text yeterli (WebView gereksiz). */
+/**
+ * Metinde matematik işareti var mı? Yoksa düz Text yeterli (WebView gereksiz).
+ * $ · \komut · \, \; \! \: (boşluk komutları) · JSON kaçışıyla bozulup kontrol karakterine
+ * dönmüş komutlar (\f→form feed: "\frac"→"rac"; \b,\v de) → bunları da matematik say.
+ */
 export function iceriyorMat(s?: string): boolean {
-  return !!s && /\$|\\[a-zA-Z]/.test(s);
+  return !!s && /[$]|\\[a-zA-Z,;!:]|[\f\b\v]/.test(s);
+}
+
+/**
+ * JSON kaçış kurtarma. Model "\frac" gibi TEK ters bölülü LaTeX yazınca "\f" geçerli bir JSON
+ * kaçışı (form feed) olduğu için JSON.parse onu kontrol karakterine çevirir → ekranda "rac" kalır.
+ * Aynı çakışma: \b (\beta,\begin,\binom), \v (\vec,\varphi), \t (\times,\theta), \r (\rho,\right).
+ * Bu beş kontrol karakteri içerikte ASLA meşru görünmez → komuta geri çevirmek güvenlidir.
+ * tamMat (tek satır saf formül) ise satır sonu da meşru değildir → \n'i de komuta çevir
+ * (\neq,\nu,\nabla kurtulur). Düz metinde \n GERÇEK satır sonu olabileceği için ona dokunma.
+ */
+function kontrolKurtar(s: string, tamMat: boolean): string {
+  const t = s
+    .replace(/\f/g, '\\f')
+    .replace(/\x08/g, '\\b')
+    .replace(/\v/g, '\\v')
+    .replace(/\t/g, '\\t')
+    .replace(/\r/g, '\\r');
+  return tamMat ? t.replace(/\n/g, '\\n') : t;
 }
 
 /**
@@ -64,9 +89,15 @@ function latexGuvenli(s: string): string {
     .join('');
 }
 
-/** Metni HTML için güvenli hale getirir; **kalın** → <strong>, matematik $ sınırlayıcıları korunur. */
-function htmlKacis(s: string): string {
-  return latexGuvenli(kacislariDuzelt(s))
+/**
+ * Metni HTML için güvenli hale getirir; **kalın** → <strong>, matematik $ sınırlayıcıları korunur.
+ * tamMat: tüm içerik tek bir matematik ifadesi (formül kartı sol/sağ gibi) → $ yoksa bütünü tek
+ * math olarak sarar; böylece "n \, x^{n-1}" gibi çıplak üst/alt simgeli ifadeler de render olur.
+ */
+function htmlKacis(s: string, tamMat = false): string {
+  const duz = kacislariDuzelt(kontrolKurtar(s, tamMat));
+  const mat = tamMat && !duz.includes('$') ? `$${duz}$` : latexGuvenli(duz);
+  return mat
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -81,17 +112,15 @@ const SINIRLAYICILAR = [
   { left: '\\[', right: '\\]', display: true },
 ];
 
-export function Formul({ icerik, renk = COLORS.text, boyut = 14, kalin, hizala = 'left', style }: FormulProps) {
+export function Formul({ icerik, renk = COLORS.text, boyut = 14, kalin, hizala = 'left', tamMat, style }: FormulProps) {
   const metin = (icerik ?? '').trim();
   if (!metin) return null;
-  if (Platform.OS === 'web') {
-    return <FormulWeb icerik={metin} renk={renk} boyut={boyut} kalin={kalin} hizala={hizala} style={style} />;
-  }
-  return <FormulNative icerik={metin} renk={renk} boyut={boyut} kalin={kalin} hizala={hizala} style={style} />;
+  const ortak: IcFormulProps = { icerik: metin, renk, boyut, kalin, hizala, tamMat, style };
+  return Platform.OS === 'web' ? <FormulWeb {...ortak} /> : <FormulNative {...ortak} />;
 }
 
 // ── Native: WebView içinde KaTeX ───────────────────────────────────────
-function FormulNative({ icerik, renk, boyut, kalin, hizala, style }: IcFormulProps) {
+function FormulNative({ icerik, renk, boyut, kalin, hizala, tamMat, style }: IcFormulProps) {
   const [yukseklik, setYukseklik] = useState(Math.round((boyut ?? 14) * 1.6));
 
   const html = `<!doctype html><html><head>
@@ -104,7 +133,7 @@ function FormulNative({ icerik, renk, boyut, kalin, hizala, style }: IcFormulPro
   .katex{font-size:1.05em;}
   .katex-display{margin:6px 0;overflow:hidden;}
 </style></head>
-<body><div id="k">${htmlKacis(icerik)}</div>
+<body><div id="k">${htmlKacis(icerik, tamMat)}</div>
 <script src="${CDN}/katex.min.js"></script>
 <script src="${CDN}/contrib/auto-render.min.js"></script>
 <script>
@@ -212,7 +241,7 @@ function fitMatematik(kap: any) {
   }
 }
 
-function FormulWeb({ icerik, renk, boyut, kalin, hizala, style }: IcFormulProps) {
+function FormulWeb({ icerik, renk, boyut, kalin, hizala, tamMat, style }: IcFormulProps) {
   const ref = useRef<any>(null);
   useEffect(() => {
     let iptal = false;
@@ -220,7 +249,7 @@ function FormulWeb({ icerik, renk, boyut, kalin, hizala, style }: IcFormulProps)
       const el = ref.current;
       const render = (window as any).renderMathInElement;
       if (iptal || !el) return;
-      el.innerHTML = htmlKacis(icerik);
+      el.innerHTML = htmlKacis(icerik, tamMat);
       if (render) {
         try {
           render(el, { delimiters: SINIRLAYICILAR, throwOnError: false });
@@ -234,7 +263,7 @@ function FormulWeb({ icerik, renk, boyut, kalin, hizala, style }: IcFormulProps)
     return () => {
       iptal = true;
     };
-  }, [icerik]);
+  }, [icerik, tamMat]);
 
   // react-native-web ortamında gerçek bir <div> render edilir.
   const ReactWeb = require('react');

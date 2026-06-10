@@ -91,6 +91,34 @@ function gecerliKart(tip: string, veri: Record<string, unknown>): boolean {
   }
 }
 
+/**
+ * Kontrol karakterine dönüşmüş LaTeX komutlarını geri kurtarır. Model "\frac" gibi TEK ters bölülü
+ * LaTeX yazınca "\f" geçerli bir JSON kaçışı (form feed) olduğundan JSON.parse onu kontrol
+ * karakterine çevirir → istemcide "rac" kalır. \b,\v,\t,\r de aynı (\beta,\vec,\times,\rho).
+ * Bu beşi içerikte asla meşru görünmez → komuta geri çevirmek güvenli. (\n GERÇEK satır sonu
+ * olabildiğinden DOKUNULMAZ; formül kartı sol/sağ için istemci ayrıca \n'i de kurtarır.)
+ */
+function latexKurtar(s: string): string {
+  return s
+    .replace(/\f/g, '\\f')
+    .replace(/\x08/g, '\\b')
+    .replace(/\v/g, '\\v')
+    .replace(/\t/g, '\\t')
+    .replace(/\r/g, '\\r');
+}
+
+/** Nesnedeki tüm string alanlarda LaTeX kurtarma uygular (yalnızca kart verisi; "yanit" düz metnine değil). */
+function derinKurtar(v: unknown): unknown {
+  if (typeof v === 'string') return latexKurtar(v);
+  if (Array.isArray(v)) return v.map(derinKurtar);
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object)) o[k] = derinKurtar((v as any)[k]);
+    return o;
+  }
+  return v;
+}
+
 /** Modelin ürettiği kartları doğrular: bilinmeyen tipi/eksik veriyi düşürür, max 2 kart. */
 function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unknown> }[] {
   if (!Array.isArray(ham)) return [];
@@ -102,7 +130,7 @@ function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unkno
     if (typeof tip !== 'string' || !GECERLI_TIPLER.has(tip)) continue;
     if (!veri || typeof veri !== 'object' || Array.isArray(veri)) continue;
     if (!gecerliKart(tip, veri)) continue; // zorunlu alanı eksik kartı düşür
-    temiz.push({ tip, veri });
+    temiz.push({ tip, veri: derinKurtar(veri) as Record<string, unknown> }); // LaTeX kontrol-karakteri kurtar
     if (temiz.length >= 2) break; // yanıt başına en fazla 2 kart
   }
   return temiz;
