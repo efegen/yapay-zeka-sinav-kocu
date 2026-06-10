@@ -1,6 +1,7 @@
 // Haftalık planı takvime aktarma — önizleme + onay modalı.
-// Her günü önümüzdeki 7 günün ilgili tarihine eşler, mevcut görev/duplikasyon
-// durumlarını gösterir, kullanıcı onayıyla Firestore'a planlı görev olarak yazar.
+// Günleri bugünden ileri monoton tarihlere eşler (7 günü aşan planlar sonraki
+// haftaya taşar), mevcut görev/duplikasyon durumlarını gösterir, kullanıcı
+// onayıyla Firestore'a planlı görev olarak yazar.
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -180,7 +181,7 @@ export function PlaniTakvimeAktarModal({
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={s.baslik}>Planı takvime ekle</Text>
-            <Text style={s.altBaslik}>Her gün, önümüzdeki 7 günün tarihine eklenir</Text>
+            <Text style={s.altBaslik}>Günler bugünden başlayarak sırayla tarihlenir</Text>
           </View>
         </View>
 

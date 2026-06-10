@@ -17,19 +17,23 @@ export interface Env {
   VISION_MODEL_KOLAY?: string;
   VISION_MODEL_ORTA?: string;
   VISION_MODEL_ZOR?: string;
+  /** YKS (TYT) tarihi, "YYYY-AA-GG" — geri sayım bağlamı için (yılda bir güncellenir). */
+  YKS_TARIH?: string;
 }
 
 // Env tanımlı değilse kullanılacak makul varsayılanlar.
-// NOT: Sohbet için bilerek reasoning OLMAYAN bir model (gpt-4.1-mini) seçilir.
-// Reasoning modelleri (gpt-5*) görünür cevaptan önce dahili "düşünme" tokenı harcar ve bu
-// max_completion_tokens bütçesinden düşülür; düşük tavanda bütçe reasoning'e gidip içerik
-// boş döner (finish_reason='length') → kullanıcı "token sınırı" hatası görür. Plan/motivasyon
-// gibi sohbet işleri reasoning gerektirmez, bu yüzden gpt-4.1-mini hem güvenli hem ucuz.
+// Model seçimi günlük ÜCRETSİZ kota havuzlarına göre yapılır (paylaşımlı trafik programı):
+//   · büyük havuz (gpt-5.x / gpt-4.1 / o-serisi): 250k token/gün → KIT, yalnızca ZOR sorulara
+//   · mini havuz (gpt-5-mini / gpt-4.1-mini / nano'lar): 2.5M token/gün → bol, geri kalan her şeye
+// Bu yüzden "kolay" çözücü gpt-4.1 DEĞİL gpt-5-mini'dir (gpt-4.1 büyük havuzu yer; üstelik
+// token başına da pahalıdır). gpt-5-mini'ye reasoning_effort='minimal' verilir: düşünme tokenı
+// bütçeyi yemez, tavan öngörülebilir kalır. Sohbet reasoning gerektirmez → gpt-4.1-mini.
+// Zor sorular gpt-5.1'e gider (büyük havuzda; adaptif reasoning ile gpt-5'ten daha verimli).
 const VARSAYILAN_CHAT_MODEL = 'gpt-4.1-mini';
 const VARSAYILAN_TRIAGE = 'gpt-4.1-mini';
-const VARSAYILAN_KOLAY = 'gpt-4.1';
+const VARSAYILAN_KOLAY = 'gpt-5-mini';
 const VARSAYILAN_ORTA = 'gpt-5-mini';
-const VARSAYILAN_ZOR = 'gpt-5';
+const VARSAYILAN_ZOR = 'gpt-5.1';
 
 interface OgrenciBaglam {
   isim?: string;
@@ -43,6 +47,7 @@ interface OgrenciBaglam {
   gunlukSoruHedefi?: number;
   zorlananKonular?: string[]; // koç hafızasından (öğrencinin zorlandığı konular)
   iyiKonular?: string[]; // koç hafızasından (öğrencinin iyi olduğu konular)
+  denemeler?: string[]; // son deneme sonuçlarının tek satırlık özetleri (yeni → eski)
 }
 
 interface SohbetMesaji {
@@ -137,13 +142,67 @@ function temizleKartlar(ham: unknown): { tip: string; veri: Record<string, unkno
 }
 
 // ════════════════════════════════════════════════════════════════════
-// SİSTEM PROMPTU (v1 — GEÇİCİ)
+// SİSTEM PROMPTU
 // Koçun kişiliği, sınırları ve veriyi nasıl yorumlayacağı burada tanımlanır.
-// Bu blok bilerek tek yerde toplandı; sonraki adanmış turda SADECE bu fonksiyon
-// özenle yeniden yazılacak (gerisine dokunmadan).
+// Yapı: önce SABİT çekirdek (görev + kurallar + kart rehberi — her istekte birebir aynı,
+// böylece OpenAI prompt cache prefiksi tüm kullanıcılarda paylaşılır), EN SONDA değişken
+// öğrenci bağlamı (tarih, profil, hafıza, denemeler). Sabit kısmı genişletirken sırayı koru.
 // ════════════════════════════════════════════════════════════════════
-function sistemPromptu(b: OgrenciBaglam): string {
+function sistemPromptu(b: OgrenciBaglam, env: Env): string {
+  return [
+    'Sen "YZDSK" uygulamasının yapay zeka sınav koçusun. Türkiye\'deki YKS (TYT/AYT) sınavına',
+    'hazırlanan bir öğrenciye birebir koçluk yapıyorsun. Görevin; motivasyon vermek, çalışma',
+    'stratejisi önermek, konu/soru çözümünde yol göstermek ve öğrenciyi planlı tutmaktır.',
+    'Öğrencinin profili ve bugünün tarihi bu talimatların EN SONUNDA verilir.',
+    '',
+    'Kurallar:',
+    '- Türkçe, sıcak, samimi ve motive edici bir dille konuş. Öğrenciye ismiyle hitap edebilirsin.',
+    '- Somut ol: "çok çalış" deme; hangi konu, kaç soru, kaç dakika Pomodoro gibi uygulanabilir öneriler ver.',
+    '- ELİNDE OLMAYAN veriyi UYDURMA. Üniversite taban puanı/sıralaması veya öğrencinin geçmiş deneme',
+    '  sonuçları gibi sana verilmemiş bilgileri varmış gibi söyleme; gerekirse öğrenciden bilgi iste.',
+    '- Ciddi psikolojik/sağlık durumlarında profesyonel destek almasını da öner.',
+    '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
+    '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
+    '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
+    '- "İyi olduğu konular"ı (hafıza) gereksiz yere baştan anlatma, kısa geç; "zorlandığı konular"da ise',
+    '  daha temkinli, temelden ve sabırlı açıkla. Bu listeler sana verilmediyse uydurma.',
+    '- Öğrenci bir çözümü/konuyu anlamadığını söylerse tüm çözümü baştan DÖKME. Hangi ADIMI/kavramı anlamadığını',
+    '  AÇIKÇA belirtmişse (örn. "X adımını anlamadım") tekrar "hangi adım?" diye SORMA; doğrudan YALNIZCA o adımı',
+    '  sade, kısa ve NEDEN-li (neden bu işlem yapıldı) açıkla. Belirtmemişse önce kısaca nerede takıldığını sor.',
+    '- Tarih/gün gerektiren işlerde (haftalık plan, geri sayım, "bugün/yarın") EN SONDAKİ "Bugün" satırını',
+    '  esas al; günleri ona göre hesapla, tahmin etme.',
+    '',
+    KART_REHBERI,
+    '',
+    'Öğrenci bağlamı:',
+    ogrenciBaglamMetni(b, env),
+  ].join('\n');
+}
+
+const TR_AYLAR = [
+  'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+];
+const TR_GUNLER = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+
+/** Değişken (kullanıcıya/güne özgü) bağlam — sabit çekirdeğin SONUNA eklenir ki cache bozulmasın. */
+function ogrenciBaglamMetni(b: OgrenciBaglam, env: Env): string {
   const satirlar: string[] = [];
+
+  // Türkiye saati (UTC+3, yıl boyu sabit): plan "bugün"ü ve YKS geri sayımı buna dayanır.
+  const ist = new Date(Date.now() + 3 * 3600 * 1000);
+  satirlar.push(
+    `- Bugün: ${ist.getUTCDate()} ${TR_AYLAR[ist.getUTCMonth()]} ${ist.getUTCFullYear()} ${TR_GUNLER[ist.getUTCDay()]}`
+  );
+  if (env.YKS_TARIH) {
+    const yks = Date.parse(`${env.YKS_TARIH}T09:00:00+03:00`);
+    if (Number.isFinite(yks)) {
+      const kalan = Math.ceil((yks - ist.getTime() + 3 * 3600 * 1000) / 86_400_000);
+      if (kalan > 0 && kalan <= 400) satirlar.push(`- YKS'ye yaklaşık ${kalan} gün var.`);
+      else if (kalan <= 0 && kalan > -40) satirlar.push('- Bu yılın YKS sınavı geçti (sonuç/tercih dönemi olabilir).');
+    }
+  }
+
   if (b.isim) satirlar.push(`- İsim: ${b.isim}`);
   if (b.sinif) satirlar.push(`- Sınıf: ${b.sinif}`);
   if (b.puanTuru) satirlar.push(`- Puan türü: ${b.puanTuru}`);
@@ -165,33 +224,11 @@ function sistemPromptu(b: OgrenciBaglam): string {
   if (b.iyiKonular && b.iyiKonular.length) {
     satirlar.push(`- İyi olduğu konular (hafıza): ${b.iyiKonular.join(', ')}`);
   }
-  const baglam = satirlar.length ? satirlar.join('\n') : '- (Profil bilgisi henüz yok.)';
-
-  return [
-    'Sen "YZDSK" uygulamasının yapay zeka sınav koçusun. Türkiye\'deki YKS (TYT/AYT) sınavına',
-    'hazırlanan bir öğrenciye birebir koçluk yapıyorsun. Görevin; motivasyon vermek, çalışma',
-    'stratejisi önermek, konu/soru çözümünde yol göstermek ve öğrenciyi planlı tutmaktır.',
-    '',
-    'Öğrenci profili:',
-    baglam,
-    '',
-    'Kurallar:',
-    '- Türkçe, sıcak, samimi ve motive edici bir dille konuş. Öğrenciye ismiyle hitap edebilirsin.',
-    '- Somut ol: "çok çalış" deme; hangi konu, kaç soru, kaç dakika Pomodoro gibi uygulanabilir öneriler ver.',
-    '- ELİNDE OLMAYAN veriyi UYDURMA. Üniversite taban puanı/sıralaması veya öğrencinin geçmiş deneme',
-    '  sonuçları gibi sana verilmemiş bilgileri varmış gibi söyleme; gerekirse öğrenciden bilgi iste.',
-    '- Ciddi psikolojik/sağlık durumlarında profesyonel destek almasını da öner.',
-    '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
-    '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
-    '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
-    '- "İyi olduğu konular"ı (hafıza) gereksiz yere baştan anlatma, kısa geç; "zorlandığı konular"da ise',
-    '  daha temkinli, temelden ve sabırlı açıkla. Bu listeler sana verilmediyse uydurma.',
-    '- Öğrenci bir çözümü/konuyu anlamadığını söylerse tüm çözümü baştan DÖKME. Hangi ADIMI/kavramı anlamadığını',
-    '  AÇIKÇA belirtmişse (örn. "X adımını anlamadım") tekrar "hangi adım?" diye SORMA; doğrudan YALNIZCA o adımı',
-    '  sade, kısa ve NEDEN-li (neden bu işlem yapıldı) açıkla. Belirtmemişse önce kısaca nerede takıldığını sor.',
-    '',
-    KART_REHBERI,
-  ].join('\n');
+  if (b.denemeler && b.denemeler.length) {
+    const liste = b.denemeler.slice(0, 3).map((s) => `  · ${String(s).slice(0, 220)}`);
+    satirlar.push(`- Son denemeleri (yeni → eski):\n${liste.join('\n')}`);
+  }
+  return satirlar.join('\n');
 }
 
 // ── Yapılandırılmış çıktı yönergesi ──
@@ -226,6 +263,7 @@ const KART_REHBERI = [
   'VERİ DÜRÜSTLÜĞÜ (en kritik):',
   '- "momentum", "denemeKiyasi", "hedefOzeti", "projeksiyon", "baglamSeridi", "miniDenemeAnalizi" GEÇMİŞ VERİ ister:',
   '  bağlamda verildiyse kullan; verilmediyse UYDURMA, "yanit"ta öğrenciden iste (örn. son deneme netleri).',
+  '  Öğrenci bağlamında "Son denemeleri" satırı varsa deneme kartlarını O gerçek netlerle doldur.',
   '- Net/sıra/süre sayılarını asla tahmin edip karta yazma; yalnızca bağlamdaki değerleri kullan.',
   '',
   'KART ŞEMALARI (alan adlarını TAM kullan):',
@@ -233,15 +271,22 @@ const KART_REHBERI = [
   '- konuAdimlari: { konu, adimlar:[KISA eylem — tanım/LaTeX YOK], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] (en çok 1, alıştırma CTA\'sı) }',
   '- miniDenemeAnalizi: { baslik, dersler:[{ad,net,max,renk}], icgoru }',
   '- cozumAdimlari: { giris, adimlar:[{ad,detay}], sonuc, acikAdim? } (giris: öğrenci soruyu verdiyse tekrarlama; SEN ürettiysen soruyu giris\'e yaz)',
+  '    · sonuc: net nihai cevap. Soru ŞIKLIYSA doğru şıkkın HARFİNİ MUTLAKA yaz (örn. "Cevap: C ($24$ birim)").',
   '- ipucu: { baslik, metin }',
   '- momentum: { baslik, altBaslik?, metrikler:[{deger,etiket,icon,renk}], not? }',
   '- molaRecetesi: { baslik, altBaslik?, ogeler:[{icon,metin}], cta?:{etiket,aksiyon:"pomodoro"} }',
   '- denemeKiyasi: { baslik, altBaslik?, dersler:[{ad,net,max,onceki,renk}], toplamNet:{deger,fark}, tahminiSira?:{deger,yon:"yukari"|"asagi"|"sabit"} }',
   '- enBuyukKazanc: { ders, yuzde(0-100), renk, metin, cta?:{etiket,aksiyon:"plan"} }',
   '- haftalikPlan: { baslik, ozet, tarihAraligi?, gunler:[{gun,odak,sure,renk,bugun?,isler:[metin]}], cta?:{etiket,aksiyon:"takvim"} }',
-  '    · gun: TAM Türkçe gün adı ("Pazartesi".."Pazar"). sure: günün TOPLAM süresi BİRİMLİ ("120 dk"/"2 saat", çıplak sayı yok).',
-  '    · odak: ana ders/konu (kısa). isler: alt görevler (takvime adım olur). cta.etiket "Takvime ekle".',
+  '    · gun: TAM Türkçe gün adı ("Pazartesi".."Pazar"). Günler bağlamdaki "Bugün"den başlayıp ARDIŞIK ilerler;',
+  '      N günlük istekte N ardışık gün (7\'yi aşınca gün adları tekrar eder — normaldir). bugun:true yalnız ilk güne.',
+  '    · sure: günün TOPLAM süresi BİRİMLİ ("120 dk"/"2 saat", çıplak sayı yok). odak: ana ders/konu (kısa).',
+  '    · isler: 2-3 KISA alt görev (takvime adım olur). cta.etiket "Takvime ekle".',
+  '    · baslik ≤30 karakter, ozet tek kısa cümle. tarihAraligi KISA: "10–19 Haziran" gibi (ay/yıl tekrarı yok).',
   '- formulKarti: { ders, konu, formuller:[{sol,sag,not?}], altinKural?, kaydedilebilir? }',
+  '    · formuller: eşitliği "=" yerinden İKİYE BÖL — sol = eşitliğin SOL yanı, sag = SAĞ yanı/sonucu;',
+  '      İKİSİ de KISA LaTeX (örn. sol "(x^n)\'", sag "n \\\\cdot x^{n-1}"). not = KISA Türkçe açıklama ("Güç kuralı").',
+  '    · sol/sag içine Türkçe açıklama ya da eşitliğin TAMAMINI yazma; açıklama HER ZAMAN "not" alanına.',
   '- oturumZamanPlani: { baslik, altBaslik?, dagilim:[{ad,dk,renk}], altinKural? }',
   '- sinavCantasi: { baslik, altBaslik?, maddeler:[metin], tamamlanan?:[index] }',
   '- hedefOzeti: { hedef, yuzde(0-100), hedefSira?, guncelSira?, netler:[{ad,simdi,hedef,renk}], not? }',
@@ -252,6 +297,8 @@ const KART_REHBERI = [
   'MATEMATİK: cozumAdimlari ("detay","sonuc") ve formulKarti matematiğini LaTeX yaz ($...$ satır içi, $$...$$ blok;',
   'kesir \\frac{pay}{payda}, üs x^2, kök \\sqrt{}; düz "a/b" yok). Çok satır: $$\\begin{aligned} a &= b \\\\ &= c \\end{aligned}$$',
   '(\\begin{aligned} MUTLAKA $$...$$ içinde).',
+  'JSON string içinde her LaTeX ters bölüsünü ÇİFT yaz ("\\\\frac" gibi); tek ters bölü JSON kaçışında bozulur.',
+  '"Eşit değildir" için \\\\neq YERİNE ≠ sembolünü kullan (\\n ile başlayan komutlar satır sonuna dönüşebilir).',
 ].join('\n');
 // ════════════════════════════════════════════════════════════════════
 
@@ -268,7 +315,7 @@ const SORU_PROMPT = [
   '  "ders": "AYT Matematik" gibi,',
   '  "konu": "Limit" gibi,',
   '  "kartlar": [',
-  '    { "tip": "cozumAdimlari", "veri": { "giris": "çözüme 1 cümlelik giriş/yaklaşım", "adimlar": [{ "ad": "Adım başlığı", "detay": "açıklama/işlem" }], "sonuc": "kısa nihai cevap", "acikAdim": 0 } },',
+  '    { "tip": "cozumAdimlari", "veri": { "giris": "çözüme 1 cümlelik giriş/yaklaşım", "adimlar": [{ "ad": "Adım başlığı", "detay": "açıklama/işlem" }], "sonuc": "kısa nihai cevap (şıklı soruda şık harfiyle)", "acikAdim": 0 } },',
   '    { "tip": "ipucu", "veri": { "baslik": "Ezber ipucu", "metin": "kısa püf nokta" } }',
   '  ]',
   '}',
@@ -276,11 +323,14 @@ const SORU_PROMPT = [
   'KURALLAR:',
   '- Soruyu ve ŞIKLARI çözümde TEKRARLAMA (öğrenci zaten fotoğrafı sağladı). "giris" alanında soruyu',
   '  yeniden yazma; bunun yerine çözüme kısa bir giriş/yaklaşım cümlesi yaz (örn. "Zincir kuralıyla çözelim").',
+  '  (Nihai cevapta doğru şıkkın harfini söylemek tekrar DEĞİLDİR — o zorunludur, aşağıya bak.)',
   '- Görseldeki soruyu net OKUYAMIYORSAN (bulanık, karanlık, kesik): durum="bulanik", kartlar=[], yanit kısa açıklama.',
   '- Görselde bir SORU YOKSA (alakasız fotoğraf): durum="alakasiz", kartlar=[], yanit kısa açıklama.',
   '- Soru okunuyorsa: durum="cozuldu". Adım sayısını soruya göre AYARLA — basit soruda 1-2 kısa adım yeter,',
-  '  her şeyi gereksiz yere bölme; yalnızca çok adımlı/zor soruda 3-5 adım kullan. "sonuc" net olsun,',
-  '  şıklı soruda doğru şıkkı yaz.',
+  '  her şeyi gereksiz yere bölme; yalnızca çok adımlı/zor soruda 3-5 adım kullan.',
+  '- ŞIKLI SORUDA "sonuc" MUTLAKA doğru şıkkın HARFİNİ içersin: önce değer, sonra şık —',
+  '  örn. "Altıgenin çevresi $24$ birim → Cevap: C". Bulduğun değeri görseldeki şıklarla EŞLEŞTİR;',
+  '  hiçbir şıkla eşleşmiyorsa çözümünü gözden geçir. Şıklar görselde yoksa/okunamıyorsa yalnız değeri yaz.',
   '- "adimlar[].ad" KISA, düz Türkçe başlık olsun (LaTeX/$ KOYMA). Matematik yalnızca "detay" ve "sonuc"ta.',
   '- Metinde GERÇEK satır sonu kullan; "\\n" gibi kaçış dizilerini düz metin olarak YAZMA.',
   '- Çözmeden önce verilenleri dikkatle oku. Çözümü bitirince nihai cevabı DOĞRULA: bulduğun sonucu',
@@ -289,6 +339,8 @@ const SORU_PROMPT = [
   '  Şekil/katlama/grafik sorularında en makul standart yorumu KABUL ET (gerekirse "Şu varsayımla:" diye TEK',
   '  cümleyle belirt) ve çöz. durum="bulanik" YALNIZCA görsel gerçekten okunamıyorsa (bulanık/karanlık/kesik).',
   '- UYDURMA = yalnızca GÖREMEDİĞİN sayısal bir değeri tahmin etmek. Görüneni makul yorumlayıp çözmek uydurmak değildir.',
+  '- İstek metninde öğrencinin zorlandığı konular verilebilir; soru o konulardansa "ipucu"yu buna bağlayabilirsin',
+  '  (örn. kalıcı bir püf nokta) — zorunlu değil, doğallığı bozma.',
   '',
   'MATEMATİK BİÇİMİ (çok önemli — öğrenci için okunaklı olmalı):',
   '- Tüm matematiksel ifadeleri LaTeX ile yaz. Satır içi: $...$, ayrı satır/blok: $$...$$.',
@@ -301,6 +353,8 @@ const SORU_PROMPT = [
   '- Çok uzun eşitlik zincirini TEK satıra sıkıştırma (taşar). Uzunsa parçala: ayrı $$...$$ satırları',
   '  ya da $$\\begin{aligned} a &= b \\\\ &= c \\end{aligned}$$ kullan. ÖNEMLİ: \\begin{aligned} MUTLAKA',
   '  $$...$$ İÇİNDE olsun (çıplak bırakma); her satır \\\\ ile ayrılır.',
+  '- JSON string içinde her LaTeX ters bölüsünü ÇİFT yaz ("\\\\frac" gibi); tek ters bölü JSON kaçışında bozulur.',
+  '- "Eşit değildir" için \\\\neq YERİNE ≠ sembolünü kullan (\\n ile başlayan komutlar satır sonuna dönüşebilir).',
   '- Vurgu için metin içinde **kalın** (markdown) kullanabilirsin. Matematiği $ içine, vurguyu ** içine koy.',
   '',
   'GEOMETRİ / ŞEKİL (fark yaratan kısım):',
@@ -344,7 +398,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 
   // Son 12 mesaj + mesaj başına 2000 karakter sınırı (token tasarrufu).
   const oaMesajlar = [
-    { role: 'system', content: sistemPromptu(govde.ogrenciBaglam ?? {}) },
+    { role: 'system', content: sistemPromptu(govde.ogrenciBaglam ?? {}, env) },
     ...mesajlar.slice(-12).map((m) => ({
       role: m.rol === 'asistan' ? 'assistant' : 'user',
       content: String(m.metin ?? '').slice(0, 2000),
@@ -354,17 +408,40 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   // Model env'den gelir (wrangler.toml [vars] / .dev.vars). Kod değişmeden değiştirilebilir.
   const model = env.CHAT_MODEL || VARSAYILAN_CHAT_MODEL;
 
-  const oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 1500 });
-  if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
+  // Tavan 2600: 10+ günlük haftalikPlan + yanit rahat sığsın (kesilen JSON ayrıştırılamaz).
+  let oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 2600 }, 'chat');
+  if (oa.hata) return json({ hata: dostcaHata(oa), detay: oa.detay }, 502);
 
-  const cikti = jsonAyristir(oa.ham!);
-  const yanitMetni =
-    typeof cikti.yanit === 'string' && cikti.yanit.trim() ? cikti.yanit.trim() : oa.ham!;
+  let cikti = jsonAyristir(oa.ham!);
+  let kartlar = temizleKartlar(cikti.kartlar);
+  let yanit = typeof cikti.yanit === 'string' ? cikti.yanit.trim() : '';
+
+  // JSON bozuk/kesikse HAM metni kullanıcıya ASLA gösterme: bir kez daha geniş tavanla dene,
+  // o da olmazsa dürüst bir hata dön (UI zaten "Tekrar Dene" balonu gösteriyor).
+  if (!yanit && !kartlar.length) {
+    oa = await openAiTamamla(env, { model, messages: oaMesajlar, max_completion_tokens: 3200 }, 'chat-retry');
+    if (oa.hata) return json({ hata: dostcaHata(oa), detay: oa.detay }, 502);
+    cikti = jsonAyristir(oa.ham!);
+    kartlar = temizleKartlar(cikti.kartlar);
+    yanit = typeof cikti.yanit === 'string' ? cikti.yanit.trim() : '';
+    if (!yanit && !kartlar.length) {
+      return json({ hata: 'Koç yanıtını hazırlarken bir sorun oluştu. Lütfen tekrar dener misin?' }, 502);
+    }
+  }
+
   return json({
-    yanit: yanitMetni,
-    kartlar: temizleKartlar(cikti.kartlar),
+    yanit: yanit || 'Hazırladım 👇',
+    kartlar,
     hafiza: temizleHafiza(cikti.hafiza),
   });
+}
+
+/** OpenAI hata yanıtını kullanıcı diline çevirir (429 = kota/yoğunluk). */
+function dostcaHata(oa: { hata?: string; kod?: number }): string {
+  if (oa.kod === 429) {
+    return 'AI şu an çok yoğun ya da günlük kullanım sınırına ulaşıldı. Birazdan tekrar dener misin? 💜';
+  }
+  return oa.hata || 'AI şu an yanıt veremedi.';
 }
 
 /**
@@ -387,18 +464,22 @@ type ReasoningSeviye = 'minimal' | 'low' | 'medium' | 'high';
  * Zorluğa göre çözücü model + token tavanı + reasoning seviyesi (env'den, varsayılanlarla).
  * Reasoning modellerinde (gpt-5*) tavan, reasoning + görünür çıktının İKİSİNİ birden barındırmalı;
  * aksi halde bütçe reasoning'e gidip içerik boş döner. Zor soruda reasoning'i koru (doğruluk),
- * tavanı yüksek tut; orta soruda reasoning'i 'low' yapıp hız/maliyet dengele.
+ * tavanı yüksek tut; kolay soruda 'minimal' ile hız koru. Triyaj TEREDDÜTLÜYSE (belirsiz)
+ * modeli büyütmek yerine reasoning'i yükselt: günlük büyük-model kotası gerçekten zor
+ * sorulara saklanır, sınırdaki soru yine güçlü (medium) çözülür.
  */
 function cozucuSec(
   env: Env,
-  zorluk?: string
+  zorluk?: string,
+  belirsiz?: boolean
 ): { model: string; tavan: number; reasoning?: ReasoningSeviye } {
   if (zorluk === 'zor')
     return { model: env.VISION_MODEL_ZOR || VARSAYILAN_ZOR, tavan: 12000, reasoning: 'medium' };
   if (zorluk === 'kolay')
-    // gpt-4.1: reasoning OLMAYAN model → reasoning_effort gönderilmez.
-    return { model: env.VISION_MODEL_KOLAY || VARSAYILAN_KOLAY, tavan: 2500 };
+    return { model: env.VISION_MODEL_KOLAY || VARSAYILAN_KOLAY, tavan: 3500, reasoning: 'minimal' };
   // orta / bilinmiyor
+  if (belirsiz)
+    return { model: env.VISION_MODEL_ORTA || VARSAYILAN_ORTA, tavan: 8000, reasoning: 'medium' };
   return { model: env.VISION_MODEL_ORTA || VARSAYILAN_ORTA, tavan: 6000, reasoning: 'low' };
 }
 
@@ -409,13 +490,19 @@ function cozucuSec(
 async function triajla(
   env: Env,
   dataUrl: string
-): Promise<{ zorluk?: string; konu?: string; durum?: 'bulanik' | 'alakasiz'; yanit?: string }> {
+): Promise<{
+  zorluk?: string;
+  belirsiz?: boolean;
+  konu?: string;
+  durum?: 'bulanik' | 'alakasiz';
+  yanit?: string;
+}> {
   const model = env.VISION_MODEL_TRIAGE || VARSAYILAN_TRIAGE;
   const oa = await openAiTamamla(env, {
     model,
     messages: [{ role: 'system', content: TRIAGE_PROMPT }, gorselMesaji(dataUrl, 'Bu soruyu sınıflandır (ÇÖZME).', 'low')],
     max_completion_tokens: 400,
-  });
+  }, 'triyaj');
   if (oa.hata) return {}; // triyaj başarısız → orta seviye varsayımıyla devam et
   const c = jsonAyristir(oa.ham!);
   if (c.soruVar === false) {
@@ -425,16 +512,11 @@ async function triajla(
     return { durum: 'bulanik', yanit: 'Fotoğraf net değil — daha aydınlık ve yakından tekrar çeker misin?' };
   }
   const hamZorluk = c.zorluk === 'kolay' || c.zorluk === 'zor' ? c.zorluk : 'orta';
-  // Doğruluk önceliği: triyaj tereddütteyse (emin=false) bir üst basamağa yükselt. Ayrıca "kolay"a
-  // YALNIZCA emin=true ise güven — böylece zor bir soru reasoning'siz zayıf modele asla düşmez;
-  // sınırdakiler reasoning'li gpt-5-mini'ye (orta) gider. Fazla güçlü model, yanlış cevaptan iyidir.
-  let zorluk = hamZorluk;
-  if (c.emin === false) {
-    zorluk = hamZorluk === 'kolay' ? 'orta' : 'zor';
-  } else if (c.emin !== true && hamZorluk === 'kolay') {
-    zorluk = 'orta';
-  }
-  return { zorluk, konu: typeof c.konu === 'string' ? c.konu : '' };
+  // "Kolay"a YALNIZCA emin=true ise güven — zor bir soru reasoning'i kısılmış hatta düşmesin.
+  // Tereddüt (emin=false) modeli BÜYÜTMEZ; cozucuSec'te reasoning'i yükseltir (kota dostu,
+  // doğruluk korunur). Yanlış cevaptansa biraz fazla düşünme tercih edilir.
+  const zorluk = hamZorluk === 'kolay' && c.emin !== true ? 'orta' : hamZorluk;
+  return { zorluk, belirsiz: c.emin === false, konu: typeof c.konu === 'string' ? c.konu : '' };
 }
 
 async function handleSoru(request: Request, env: Env): Promise<Response> {
@@ -458,8 +540,8 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
     return json({ durum: triaj.durum, yanit: triaj.yanit ?? '', ders: '', konu: '', kartlar: [] });
   }
 
-  // 2) Zorluğa göre çözücü seç (kolay→gpt-4.1, orta→gpt-5-mini, zor→gpt-5).
-  const { model, tavan, reasoning } = cozucuSec(env, triaj.zorluk);
+  // 2) Zorluğa göre çözücü seç (kolay/orta→gpt-5-mini, zor→gpt-5.1; belirsizde reasoning artar).
+  const { model, tavan, reasoning } = cozucuSec(env, triaj.zorluk, triaj.belirsiz);
   // Talimatı modelin gücüyle hizala: zorda tüm adımları + doğrulamayı zorla, kolayda kısa tut.
   const zorlukNotu =
     triaj.zorluk === 'zor'
@@ -467,46 +549,87 @@ async function handleSoru(request: Request, env: Env): Promise<Response> {
       : triaj.zorluk === 'kolay'
       ? ' Kısa ve net tut; yine de nihai sonucu bir kez kontrol et.'
       : ' Adımları net göster ve nihai sonucu kontrol et.';
+  // Koç hafızası: zorlanılan konular ipucunu kişiselleştirebilsin (sistem promptu sabit kalır).
+  const zorlanan = (govde.ogrenciBaglam?.zorlananKonular ?? [])
+    .filter((k): k is string => typeof k === 'string' && !!k.trim())
+    .slice(0, 5);
+  const hafizaNotu = zorlanan.length
+    ? ` Öğrencinin zorlandığı konular: ${zorlanan.join(', ')}.`
+    : '';
   const istek =
     (not
       ? `Bu fotoğraftaki YKS sorusunu çöz. Öğrencinin notu/isteği: "${not}" — buna da dikkat et.`
-      : 'Bu fotoğraftaki YKS sorusunu çöz.') + zorlukNotu;
-  const oa = await openAiTamamla(env, {
+      : 'Bu fotoğraftaki YKS sorusunu çöz.') + zorlukNotu + hafizaNotu;
+  const mesajlar = [{ role: 'system', content: SORU_PROMPT }, gorselMesaji(dataUrl, istek)];
+
+  let oa = await openAiTamamla(env, {
     model,
-    messages: [{ role: 'system', content: SORU_PROMPT }, gorselMesaji(dataUrl, istek)],
+    messages: mesajlar,
     max_completion_tokens: tavan,
     reasoning_effort: reasoning,
-  });
-  if (oa.hata) return json({ hata: oa.hata, detay: oa.detay }, 502);
+  }, `soru-${triaj.zorluk ?? 'orta'}`);
 
-  const cikti = jsonAyristir(oa.ham!);
+  let cikti = oa.ham ? jsonAyristir(oa.ham) : {};
+  let kartlar = temizleKartlar(cikti.kartlar);
+  const bosMu = () =>
+    !kartlar.length &&
+    !(typeof cikti.yanit === 'string' && cikti.yanit.trim()) &&
+    cikti.durum !== 'bulanik' &&
+    cikti.durum !== 'alakasiz';
+
+  // Çözücü düşerse (kota dolumu, model erişimi, kesik/boş yanıt) mini havuzdaki modelle
+  // bir kez daha dene — öğrenci cevapsız kalmasın. Aynı modelse tekrar denemenin anlamı yok.
+  const yedekModel = env.VISION_MODEL_ORTA || VARSAYILAN_ORTA;
+  if ((oa.hata || bosMu()) && yedekModel !== model) {
+    oa = await openAiTamamla(env, {
+      model: yedekModel,
+      messages: mesajlar,
+      max_completion_tokens: 8000,
+      reasoning_effort: 'medium',
+    }, 'soru-yedek');
+    cikti = oa.ham ? jsonAyristir(oa.ham) : {};
+    kartlar = temizleKartlar(cikti.kartlar);
+  }
+  if (oa.hata) return json({ hata: dostcaHata(oa), detay: oa.detay }, 502);
+  if (bosMu()) {
+    return json({ hata: 'Bu soruyu şu an çözemedim. Lütfen tekrar dener misin?' }, 502);
+  }
+
   const durum =
     cikti.durum === 'bulanik' || cikti.durum === 'alakasiz' ? cikti.durum : 'cozuldu';
   return json({
     durum,
     yanit: typeof cikti.yanit === 'string' ? cikti.yanit : '',
-    ders: typeof cikti.ders === 'string' ? cikti.ders : triaj.konu?.split(' ')[0] ?? '',
+    ders: typeof cikti.ders === 'string' ? cikti.ders : triaj.konu?.split('·')[0]?.trim() ?? '',
     konu: typeof cikti.konu === 'string' ? cikti.konu : triaj.konu ?? '',
-    kartlar: durum === 'cozuldu' ? temizleKartlar(cikti.kartlar) : [],
+    kartlar: durum === 'cozuldu' ? kartlar : [],
   });
 }
 
 /** gpt-5* ve o-serisi reasoning modelidir; bunlar özel temperature kabul etmez (default 1 zorunlu). */
-function reasoningModel(model: string, reasoning_effort?: ReasoningSeviye): boolean {
-  return reasoning_effort !== undefined || /^(gpt-5|o\d)/.test(model);
+function reasoningModel(model: string): boolean {
+  return /^(gpt-5|o\d)/.test(model);
 }
 
-/** OpenAI chat/completions çağrısı (JSON çıktı). Ortak hata yönetimi. */
+/**
+ * OpenAI chat/completions çağrısı (JSON çıktı). Ortak hata yönetimi + kullanım logu.
+ * `etiket` yalnızca log içindir (hangi akış: chat / triyaj / soru-zor ...).
+ */
 async function openAiTamamla(
   env: Env,
   payload: {
     model: string;
     messages: unknown[];
     max_completion_tokens: number;
-    /** Yalnızca reasoning modellerinde (gpt-5*) gönderilir; undefined ise JSON'dan düşer. */
+    /** Yalnızca reasoning modellerine (gpt-5* ve o-serisi) gönderilir; diğerleri 400 ile reddeder. */
     reasoning_effort?: ReasoningSeviye;
-  }
-): Promise<{ ham?: string; hata?: string; detay?: string }> {
+  },
+  etiket: string
+): Promise<{ ham?: string; hata?: string; detay?: string; kod?: number }> {
+  // Parametreleri modele göre ayıkla: env üzerinden model değiştirilse bile istek geçerli kalsın.
+  // Reasoning'siz modellerde (gpt-4.1*) düşük temperature → aritmetik kararlılık; gpt-5*/o*
+  // özel temperature kabul etmediğinden onlara gönderilmez, reasoning_effort yalnız onlara gider.
+  const akilYurutur = reasoningModel(payload.model);
   let oaYanit: Response;
   try {
     oaYanit = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -516,12 +639,15 @@ async function openAiTamamla(
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        ...payload,
+        model: payload.model,
+        messages: payload.messages,
         // Yeni model uyumu: max_tokens yerine max_completion_tokens.
-        // reasoning_effort undefined ise JSON.stringify onu otomatik atar (reasoning olmayan modeller).
-        // Reasoning'siz modellerde (gpt-4.1*) düşük temperature → aritmetik kararlılık (token-nötr
-        // doğruluk kazancı); gpt-5*/o* özel temperature kabul etmediğinden onlara GÖNDERİLMEZ.
-        ...(reasoningModel(payload.model, payload.reasoning_effort) ? {} : { temperature: 0.2 }),
+        max_completion_tokens: payload.max_completion_tokens,
+        ...(akilYurutur
+          ? payload.reasoning_effort
+            ? { reasoning_effort: payload.reasoning_effort }
+            : {}
+          : { temperature: 0.2 }),
         response_format: { type: 'json_object' },
       }),
     });
@@ -531,14 +657,34 @@ async function openAiTamamla(
 
   if (!oaYanit.ok) {
     const detay = await oaYanit.text();
-    return { hata: 'AI servisi hata döndürdü.', detay: detay.slice(0, 300) };
+    console.log(
+      JSON.stringify({ olay: 'openai-hata', etiket, model: payload.model, kod: oaYanit.status, detay: detay.slice(0, 200) })
+    );
+    return { hata: 'AI servisi hata döndürdü.', detay: detay.slice(0, 300), kod: oaYanit.status };
   }
 
   const veri = (await oaYanit.json()) as {
     choices?: { message?: { content?: string }; finish_reason?: string }[];
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      prompt_tokens_details?: { cached_tokens?: number };
+    };
   };
   const secim = veri.choices?.[0];
   const ham = secim?.message?.content?.trim();
+  // Günlük ücretsiz kota takibi için kullanım kaydı (mesaj İÇERİĞİ loglanmaz — gizlilik).
+  console.log(
+    JSON.stringify({
+      olay: 'openai',
+      etiket,
+      model: payload.model,
+      girdi: veri.usage?.prompt_tokens,
+      cikti: veri.usage?.completion_tokens,
+      cacheli: veri.usage?.prompt_tokens_details?.cached_tokens,
+      bitis: secim?.finish_reason,
+    })
+  );
   if (!ham) {
     // Reasoning modelinde içerik boşsa genelde token sınırına takılmıştır (finish_reason='length').
     return {

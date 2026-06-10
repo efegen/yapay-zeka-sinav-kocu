@@ -53,14 +53,22 @@ export function gunIndeksi(gunAdi: string): number | null {
   return ilk3 in kisa ? kisa[ilk3] : null;
 }
 
-// Bir haftanın gününün BUGÜNDEN itibaren ilk gelişi (bugün dahil, 0–6 gün ileri).
-// "1 haftalık plan" böylece geçmişe düşmeden önümüzdeki 7 güne yayılır.
-export function sonrakiTarih(haftaninGunu: number, bugun: Date): Date {
-  const d = new Date(bugun);
-  d.setHours(0, 0, 0, 0);
-  const fark = (haftaninGunu - d.getDay() + 7) % 7;
-  d.setDate(d.getDate() + fark);
-  return d;
+// Plan günlerini BUGÜNDEN ileri MONOTON tarihlere eşler: her gün, bir önceki
+// günün tarihinden SONRAKİ ilk gelişine düşer. Böylece 7 günü aşan planlarda
+// tekrar eden gün adı ("Çarşamba" ×2) sonraki haftaya taşar; aynı tarihe binmez.
+// Gün adı çözülemeyen satır imlecin gösterdiği güne düşer (sıralı yedek) —
+// her satır mutlaka bir tarih alır.
+export function planGunTarihleri(gunler: { gun?: unknown }[], bugun: Date): Date[] {
+  const imlec = new Date(bugun);
+  imlec.setHours(0, 0, 0, 0);
+  return (gunler || []).map((g) => {
+    const idx = gunIndeksi(String(g?.gun ?? ''));
+    const t = new Date(imlec);
+    if (idx !== null) t.setDate(t.getDate() + ((idx - t.getDay() + 7) % 7));
+    imlec.setTime(t.getTime());
+    imlec.setDate(imlec.getDate() + 1);
+    return t;
+  });
 }
 
 // "120" → 120, "2 saat" → 120, "1.5 saat" → 90, "90 dk" → 90,
@@ -139,21 +147,13 @@ interface PlanGun {
   isler?: string[];
 }
 
-// Bugünden i gün sonrası (gece yarısı). Gün adı çözülemezse sıralı yedek.
-function tarihIndeksli(bugun: Date, i: number): Date {
-  const d = new Date(bugun);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + i);
-  return d;
-}
-
 // Plan günlerini takvim taslaklarına çevir. Boş/odaksız günler atlanır.
-// Gün adı çözülemezse (model garip bir değer döndürdüyse) sıra numarasına göre
-// tarih atanır — böylece her gün mutlaka bir tarihe düşer, "ekle" pasif kalmaz.
+// Tarihler planGunTarihleri ile atanır — her gün mutlaka bir tarihe düşer,
+// "ekle" pasif kalmaz; kart üzerindeki gün kutucuklarıyla da birebir aynıdır.
 export function planiTaslaklaraCevir(gunler: PlanGun[], bugun: Date): GunTaslak[] {
   const gecerli = (gunler || []).filter((g) => g && String(g.odak ?? '').trim());
+  const tarihler = planGunTarihleri(gecerli, bugun);
   return gecerli.map((g, i) => {
-    const idx = gunIndeksi(g.gun);
     const dakika = dakikaCoz(g.sure) || 60; // çözülemezse makul varsayılan
     const odak = String(g.odak ?? '').trim();
     const adimlar = islerdenAdimlar(g.isler ?? [], dakika);
@@ -161,7 +161,7 @@ export function planiTaslaklaraCevir(gunler: PlanGun[], bugun: Date): GunTaslak[
     const toplam = adimlar ? adimlar.reduce((t, a) => t + a.dk, 0) : dakika;
     return {
       gunAdi: String(g.gun ?? `${i + 1}. gün`),
-      tarih: idx === null ? tarihIndeksli(bugun, i) : sonrakiTarih(idx, bugun),
+      tarih: tarihler[i],
       baslik: odak,
       ders: dersBul(odak),
       tur: /deneme/i.test(odak) ? 'deneme' : 'plan',
@@ -177,4 +177,33 @@ export function sureEtiketi(sure: string | number | undefined | null): string {
   const s = String(sure ?? '').trim();
   if (!s) return '';
   return /^\d+([.,]\d+)?$/.test(s) ? `${s} dk` : s;
+}
+
+// "12 Haziran 2026" gibi tek bir Türkçe tarihi parçalar. Yıl opsiyonel.
+function tarihParcala(s: string): { gun: string; ay: string; yil?: string } | null {
+  const m = s.trim().match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)(?:\s+(\d{4}))?$/);
+  return m ? { gun: m[1], ay: m[2], yil: m[3] } : null;
+}
+
+// Modelin ürettiği tarih aralığını görüntü için kısaltır: tekrar eden ay/yıl atılır.
+// "10 Haziran 2026 - 19 Haziran 2026" → "10–19 Haziran 2026"
+// "28 Haziran 2026 - 5 Temmuz 2026"   → "28 Haziran – 5 Temmuz 2026"
+// Tanınmayan biçim olduğu gibi döner (yalnızca ayraç normalize edilir).
+export function tarihAraligiKisalt(aralik: string | undefined | null): string {
+  const s = String(aralik ?? '').trim();
+  if (!s) return '';
+  const parcalar = s.split(/\s*[-–—]\s*/);
+  if (parcalar.length !== 2) return s;
+  const a = tarihParcala(parcalar[0]);
+  const b = tarihParcala(parcalar[1]);
+  // "10–19 Haziran" gibi zaten kısa biçim: sol taraf çıplak gün sayısı.
+  if (!a && b && /^\d{1,2}$/.test(parcalar[0])) return `${parcalar[0]}–${b.gun} ${b.ay}${b.yil ? ` ${b.yil}` : ''}`;
+  if (!a || !b) return `${parcalar[0]} – ${parcalar[1]}`;
+  const ayniAy = a.ay.toLocaleLowerCase('tr') === b.ay.toLocaleLowerCase('tr');
+  const ayniYil = !a.yil || !b.yil || a.yil === b.yil;
+  const yil = b.yil ?? a.yil;
+  const yilEk = yil ? ` ${yil}` : '';
+  if (ayniAy && ayniYil) return `${a.gun}–${b.gun} ${b.ay}${yilEk}`;
+  if (ayniYil) return `${a.gun} ${a.ay} – ${b.gun} ${b.ay}${yilEk}`;
+  return `${parcalar[0]} – ${parcalar[1]}`;
 }

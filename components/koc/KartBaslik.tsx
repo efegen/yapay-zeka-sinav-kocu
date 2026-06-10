@@ -24,13 +24,15 @@ export function KartBaslik({ icon, renk = COLORS.primary, baslik, alt, sag, cizg
         <Text style={s.baslik}>{baslik}</Text>
         {!!alt && <Text style={s.alt}>{alt}</Text>}
       </View>
-      {sag}
+      {sag ? <View style={s.sag}>{sag}</View> : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
   kap: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 15 },
+  // Sağ slot başlık sütununu ezemez: uzun rozet metni başlığı harf harf kırdırmasın.
+  sag: { flexShrink: 1, maxWidth: '40%', alignItems: 'flex-end' },
   cizgi: { borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
   ikonKutu: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   baslik: { fontSize: 14, fontWeight: '700', color: COLORS.text },
