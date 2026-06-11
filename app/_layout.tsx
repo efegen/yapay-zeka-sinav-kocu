@@ -21,6 +21,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="soru-yukle" />
           <Stack.Screen name="deneme-ekle" />
+          <Stack.Screen name="koc-hafiza" />
+          <Stack.Screen name="plan-kur" />
           <Stack.Screen name="plan/[id]" />
         </Stack>
       </PlanProvider>

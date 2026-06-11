@@ -13,16 +13,19 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../services/firebaseConfig';
 import { useProfile } from '../../hooks/useProfile';
 import { useKocHafiza } from '../../hooks/useKocHafiza';
 import { useSohbetler } from '../../hooks/useSohbetler';
-import { konuSinyali, zorlananKonularOzet, iyiKonularOzet } from '../../services/kocHafizaService';
+import { konuSinyali, zorlananKonularOzet, iyiKonularOzet, kisiselNotEkle, kisiselNotlarOzet } from '../../services/kocHafizaService';
+import { denemeleriGetir } from '../../services/firestoreService';
+import { denemeAiOzeti } from '../../models/deneme';
 import { COLORS } from '../../constants/colors';
 import { bildir } from '../../utils/bildirim';
 import { kocaSor, soruyuCoz, baglamKur, AiHatasi } from '../../services/aiService';
@@ -62,6 +65,29 @@ function satirlariKur(mesajlar: Balon[]): Satir[] {
   return satirlar;
 }
 
+/**
+ * Büyük soru fotoğrafını uzun kenarı ~1500 px olacak şekilde küçültür: soru metni bu boyutta
+ * rahat okunur, görselin token maliyeti ciddi düşer. Küçük/boyutu bilinmeyen görsele dokunmaz;
+ * küçültme herhangi bir nedenle başarısız olursa orijinaliyle devam eder (çözümü asla engelleme).
+ */
+async function fotoKucult(asset: ImagePicker.ImagePickerAsset): Promise<{ base64: string; uri: string } | null> {
+  const w = asset.width ?? 0;
+  const h = asset.height ?? 0;
+  if (Math.max(w, h) > 1600) {
+    try {
+      const kucuk = await manipulateAsync(asset.uri, [{ resize: w >= h ? { width: 1500 } : { height: 1500 } }], {
+        compress: 0.7,
+        format: SaveFormat.JPEG,
+        base64: true,
+      });
+      if (kucuk.base64) return { base64: kucuk.base64, uri: kucuk.uri };
+    } catch {
+      // sessizce orijinale düş
+    }
+  }
+  return asset.base64 ? { base64: asset.base64, uri: asset.uri } : null;
+}
+
 export default function AiKoc() {
   const router = useRouter();
   const { profil } = useProfile();
@@ -76,9 +102,36 @@ export default function AiKoc() {
   const { aktifMesajlar: mesajlar, aktifId, gecmis, mesajlariGuncelle, yeniSohbet, sohbetSec, tumunuTemizle } =
     useSohbetler(uid);
 
-  /** Güncel profil + hafıza bağlamı. */
+  // Son deneme özetleri — koç gerçek netleri görsün (denemeKiyasi/projeksiyon uydurma yerine
+  // veriyle çalışır). Ekrana her dönüşte tazelenir: öğrenci deneme ekleyip koça sorabilir.
+  const [denemeOzetleri, setDenemeOzetleri] = useState<string[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid) {
+        setDenemeOzetleri([]);
+        return;
+      }
+      let aktif = true;
+      denemeleriGetir(uid)
+        .then((liste) => {
+          if (aktif) setDenemeOzetleri(liste.slice(0, 3).map(denemeAiOzeti));
+        })
+        .catch(() => {}); // özet alınamazsa koç onsuz da çalışır
+      return () => {
+        aktif = false;
+      };
+    }, [uid])
+  );
+
+  /** Güncel profil + hafıza + deneme bağlamı. */
   function suankiBaglam() {
-    return baglamKur(profil, zorlananKonularOzet(hafiza), iyiKonularOzet(hafiza));
+    return baglamKur(
+      profil,
+      zorlananKonularOzet(hafiza),
+      iyiKonularOzet(hafiza),
+      denemeOzetleri,
+      kisiselNotlarOzet(hafiza)
+    );
   }
 
   const { soru: paramSoru } = useLocalSearchParams<{ soru?: string }>();
@@ -145,6 +198,10 @@ export default function AiKoc() {
       if (uid && yanit.hafiza) {
         konuSinyali(uid, { ad: yanit.hafiza.konu, ders: yanit.hafiza.ders, sinyal: yanit.hafiza.sinyal });
       }
+      // Öğrenci kendisi hakkında kalıcı bir bilgi paylaştıysa kişisel not olarak sakla.
+      if (uid && yanit.hafizaNot) {
+        kisiselNotEkle(uid, yanit.hafizaNot);
+      }
     } catch (e) {
       const mesaj = e instanceof AiHatasi ? e.message : 'Beklenmeyen bir hata oluştu.';
       mesajlariGuncelle((m) => [
@@ -207,13 +264,13 @@ export default function AiKoc() {
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
             });
       if (sonuc.canceled) return;
-      const asset = sonuc.assets[0];
-      if (!asset.base64) {
+      const foto = await fotoKucult(sonuc.assets[0]);
+      if (!foto) {
         bildir('Hata', 'Görsel okunamadı, lütfen tekrar dene.');
         return;
       }
       // Hemen gönderme — giriş kutusunun üstünde beklesin; öğrenci not ekleyebilir.
-      setBekleyenFoto({ base64: asset.base64, uri: asset.uri });
+      setBekleyenFoto(foto);
     } catch {
       bildir('Hata', 'Görsel seçilirken bir sorun oluştu.');
     }

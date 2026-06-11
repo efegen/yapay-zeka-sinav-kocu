@@ -14,6 +14,12 @@ import type { KartBilesenProps } from './_ortak';
 // tüm ifade $...$ ile sarılacağından "x^{n-1}", "a_i", "\frac{}{}" gibi değerler render olur.
 const formulMat = (s?: string) => !!s && (iceriyorMat(s) || /[\^_{}]/.test(s));
 
+// Model şemaya rağmen bazen eşitliğin tamamını "sol"a, Türkçe açıklamayı ("Türev tanımı")
+// "sag"a yazıyor. Açıklama sağ sütunda formülü ezdiğinden (formül mikroskobik ölçekleniyor)
+// bu durumda satır düzeni yerine "etiket üstte, formül tam genişlikte" düzenine geçilir.
+const aciklamaMetni = (s?: string) =>
+  !!s && !formulMat(s) && (/\s/.test(s.trim()) || s.trim().length > 10);
+
 export function FormulKarti({ veri, onGuncelle }: KartBilesenProps<FormulKartiVeri>) {
   const kaydedildi = !!veri.kaydedildi;
   return (
@@ -29,29 +35,42 @@ export function FormulKarti({ veri, onGuncelle }: KartBilesenProps<FormulKartiVe
       </Gradyan>
 
       <View style={{ paddingHorizontal: 15, paddingTop: 6, paddingBottom: 4 }}>
-        {(veri.formuller ?? []).map((f, i) => (
-          <View key={i} style={[s.formul, i > 0 && s.ustCizgi]}>
-            {/* Formül değeri tek bir matematik ifadesi: math içeriyorsa tamamını KaTeX ile sar/render et. */}
-            {formulMat(f.sol) ? (
-              <View style={{ flex: 1 }}>
-                <Formul icerik={f.sol} renk={COLORS.text} boyut={15} tamMat />
-                {!!f.not && <Text style={s.not}>({f.not})</Text>}
-              </View>
-            ) : (
-              <Text style={s.sol}>
-                {f.sol} {!!f.not && <Text style={s.not}>({f.not})</Text>}
-              </Text>
-            )}
-            <Ionicons name="arrow-forward" size={16} color={COLORS.textLight} />
-            {formulMat(f.sag) ? (
-              <View style={{ minWidth: 30 }}>
-                <Formul icerik={f.sag} renk={COLORS.accent} boyut={17} kalin hizala="center" tamMat />
-              </View>
-            ) : (
-              <Text style={s.sag}>{f.sag}</Text>
-            )}
-          </View>
-        ))}
+        {(veri.formuller ?? []).map((f, i) =>
+          aciklamaMetni(f.sag) || !f.sag ? (
+            // "sag" açıklama metni (ya da boş): etiket üstte, formül altta tam genişlikte.
+            <View key={i} style={[s.dikey, i > 0 && s.ustCizgi]}>
+              {!!f.sag && <Text style={s.etiket}>{f.sag}</Text>}
+              {formulMat(f.sol) ? (
+                <Formul icerik={f.sol} renk={COLORS.text} boyut={16} tamMat />
+              ) : (
+                <Text style={s.sol}>{f.sol}</Text>
+              )}
+              {!!f.not && <Text style={s.not}>({f.not})</Text>}
+            </View>
+          ) : (
+            <View key={i} style={[s.formul, i > 0 && s.ustCizgi]}>
+              {/* Formül değeri tek bir matematik ifadesi: math içeriyorsa tamamını KaTeX ile sar/render et. */}
+              {formulMat(f.sol) ? (
+                <View style={{ flex: 1 }}>
+                  <Formul icerik={f.sol} renk={COLORS.text} boyut={15} tamMat />
+                  {!!f.not && <Text style={s.not}>({f.not})</Text>}
+                </View>
+              ) : (
+                <Text style={s.sol}>
+                  {f.sol} {!!f.not && <Text style={s.not}>({f.not})</Text>}
+                </Text>
+              )}
+              <Ionicons name="arrow-forward" size={16} color={COLORS.textLight} />
+              {formulMat(f.sag) ? (
+                <View style={{ flex: 1, minWidth: 30 }}>
+                  <Formul icerik={f.sag} renk={COLORS.accent} boyut={17} kalin hizala="center" tamMat />
+                </View>
+              ) : (
+                <Text style={s.sag}>{f.sag}</Text>
+              )}
+            </View>
+          )
+        )}
       </View>
 
       {!!veri.altinKural && (
@@ -95,6 +114,8 @@ const s = StyleSheet.create({
   ust: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
   konu: { fontSize: 16, fontWeight: '800', color: '#fff' },
   formul: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
+  dikey: { paddingVertical: 11, gap: 3 },
+  etiket: { fontSize: 11.5, fontWeight: '700', color: COLORS.accent },
   ustCizgi: { borderTopWidth: 1, borderTopColor: COLORS.cardBorder },
   sol: { flex: 1, fontFamily: SERIF, fontSize: 15.5, color: COLORS.text },
   not: { color: COLORS.textLight, fontSize: 11 },

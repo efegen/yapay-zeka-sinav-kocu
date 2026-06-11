@@ -9,6 +9,8 @@ export const DERS_RENK: Record<string, string> = {
   Kimya: '#F59E0B',
   Biyoloji: '#10B981',
   Türkçe: '#0EA5E9',
+  Fen: '#14B8A6',
+  Sosyal: '#64748B',
   Genel: '#64748B',
 };
 

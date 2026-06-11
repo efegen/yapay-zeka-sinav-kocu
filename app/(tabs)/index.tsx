@@ -9,16 +9,20 @@ import {
   Easing,
   Platform,
 } from 'react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfile } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { YKS_TARIHI, YKS_SEZON_BASLANGIC, YKS_YIL } from '../../constants/sinav';
 import { gunFarki, tarihUzun, aralikOrani } from '../../utils/tarih';
+import { auth } from '../../services/firebaseConfig';
+import { denemeleriGetir } from '../../services/firestoreService';
+import { netlerdenSiralama } from '../../services/yokatlasService';
+import { fmtSira, type DenemeSonuc } from '../../models/deneme';
 
 const GUNLER = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 const AYLAR = [
@@ -82,6 +86,31 @@ export default function AnaSayfa() {
   const kalanGun = useMemo(() => gunFarki(YKS_TARIHI), []);
   const sinavTarihMetni = useMemo(() => tarihUzun(YKS_TARIHI), []);
   const sezonOrani = useMemo(() => aralikOrani(YKS_SEZON_BASLANGIC, YKS_TARIHI), []);
+
+  // ── Denemelerden tahmini sıralama (son tam TYT+AYT denemesi) ──
+  const uid = auth.currentUser?.uid;
+  const [denemeler, setDenemeler] = useState<DenemeSonuc[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid) return;
+      denemeleriGetir(uid)
+        .then(setDenemeler)
+        .catch((e) => console.error('[AnaSayfa] denemeler yüklenemedi:', e));
+    }, [uid])
+  );
+
+  const diploma = profil?.diplomaNotu ?? 0;
+  const tamDenemeler = useMemo(() => denemeler.filter((d) => d.kapsam === 'ikisi'), [denemeler]);
+  const guncelSira = useMemo(
+    () => (tamDenemeler[0] ? netlerdenSiralama(tamDenemeler[0].tytNet, tamDenemeler[0].aytNet, tamDenemeler[0].alan, diploma) : null),
+    [tamDenemeler, diploma]
+  );
+  const oncekiSira = useMemo(
+    () => (tamDenemeler[1] ? netlerdenSiralama(tamDenemeler[1].tytNet, tamDenemeler[1].aytNet, tamDenemeler[1].alan, diploma) : null),
+    [tamDenemeler, diploma]
+  );
+  // Pozitif trend = sıralama küçüldü (iyileşme).
+  const siraTrend = guncelSira != null && oncekiSira != null ? oncekiSira - guncelSira : null;
 
   if (yukleniyor) {
     return (
@@ -316,7 +345,7 @@ export default function AnaSayfa() {
         </View>
       </Yukselen>
 
-      {/* ─── Tahmini sıralama — current rank takibi yok ─── */}
+      {/* ─── Tahmini sıralama — son tam denemeden ─── */}
       <Yukselen gecikme={280}>
         <View style={styles.kart}>
           <View style={styles.netBaslikSatir}>
@@ -324,18 +353,33 @@ export default function AnaSayfa() {
               <Ionicons name="podium" size={16} color={COLORS.primary} />
               <Text style={styles.kartBaslik}>Tahmini sıralama</Text>
             </View>
-            <YakindaPill />
+            {guncelSira == null ? (
+              <YakindaPill />
+            ) : siraTrend != null && siraTrend !== 0 ? (
+              <View style={[styles.siraTrend, { backgroundColor: (siraTrend > 0 ? COLORS.success : COLORS.error) + '16' }]}>
+                <Ionicons name={siraTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color={siraTrend > 0 ? COLORS.success : COLORS.error} />
+                <Text style={[styles.siraTrendMetin, { color: siraTrend > 0 ? COLORS.success : COLORS.error }]}>
+                  {fmtSira(Math.abs(siraTrend))}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.siraGovde}>
-            <Text style={styles.siraDeger}>—</Text>
-            <Text style={styles.siraAlt}>şu anki sıran</Text>
+            <Text style={styles.siraDeger}>{guncelSira != null ? `≈${fmtSira(guncelSira)}` : '—'}</Text>
+            <Text style={styles.siraAlt}>{guncelSira != null ? 'tahmini sıran' : 'şu anki sıran'}</Text>
           </View>
 
           <Text style={styles.kartNot}>
-            {siralamaHedefVar
-              ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Denemelerini ekledikçe tahmini sıralaman burada oluşacak.`
-              : 'Denemelerini ekledikçe tahmini sıralaman burada görünecek.'}
+            {guncelSira != null
+              ? siralamaHedefVar
+                ? guncelSira <= profil!.hedefSiralama!
+                  ? `🎯 Hedefini geçtin — hedef ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra.`
+                  : `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra · arada ≈${fmtSira(guncelSira - profil!.hedefSiralama!)} sıra var.`
+                : 'Son tam (TYT+AYT) denemene göre — puan türün ve diploma notun hesaba katılır.'
+              : siralamaHedefVar
+                ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada oluşacak.`
+                : 'Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada görünecek.'}
           </Text>
 
           <TouchableOpacity
@@ -556,8 +600,10 @@ const styles = StyleSheet.create({
 
   // Tahmini sıralama
   siraGovde: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
-  siraDeger: { fontSize: 30, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
+  siraDeger: { fontSize: 30, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, fontVariant: ['tabular-nums'] },
   siraAlt: { fontSize: 12, fontWeight: '600', color: COLORS.textLight },
+  siraTrend: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 99 },
+  siraTrendMetin: { fontSize: 11.5, fontWeight: '800', fontVariant: ['tabular-nums'] },
   denemeCta: {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
     marginTop: 12, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 11,

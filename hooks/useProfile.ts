@@ -7,6 +7,7 @@ export interface Profil {
   isim: string;
   email: string;
   puanTuru: string;
+  diplomaNotu?: number;
   hedefTuru?: 'universite' | 'siralama';
   hedefUniversite: string;
   hedefBolum: string;

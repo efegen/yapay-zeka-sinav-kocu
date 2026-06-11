@@ -1,4 +1,5 @@
 import universitelerData from '../assets/data/universiteler.json';
+import { yerlestirmePuani } from '../utils/puanHesapla';
 
 export interface YokatlasProgram {
   programId: string;
@@ -273,4 +274,96 @@ export const findReferencePrograms = (
   );
 
   return adaylar.slice(0, 5);
+};
+
+// ─────────────────────────────────────────────
+// Puan / net → tahmini sıralama (gerçek 2025 taban verisinden)
+// ─────────────────────────────────────────────
+
+type PuanTuru = 'SAY' | 'EA' | 'SOZ' | 'DIL';
+type SiraNok = { puan: number; sira: number };
+
+/** Taban sıralamayı sayıya çevirir; ayıraç/boş/"Dolmadı" → null. */
+const siraParse = (v: string | null | undefined): number | null => {
+  if (v == null) return null;
+  const n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+  return isNaN(n) || n <= 0 ? null : n;
+};
+
+const _siraEgrisi: Partial<Record<PuanTuru, SiraNok[]>> = {};
+
+/**
+ * Bir puan türü için "taban puan → taban sıralama" eğrisi. 2025 verisinden kurulur;
+ * 1 puanlık kovalarda ortalama sıra alınarak gürültü düşürülür ve puana göre sıralanır.
+ * Modül ömrü boyunca önbelleğe alınır (her render'da yeniden kurulmaz).
+ */
+const siraEgrisi = (puanTuru: PuanTuru): SiraNok[] => {
+  const cache = _siraEgrisi[puanTuru];
+  if (cache) return cache;
+  const kova = new Map<number, { top: number; adet: number }>();
+  for (const p of programlar) {
+    if (p.puanTuru !== puanTuru) continue;
+    const puan = gecerliPuan(p.tabanPuan_2025);
+    const sira = siraParse(p.tabanSiralama_2025);
+    if (puan == null || sira == null) continue;
+    const k = Math.round(puan);
+    const g = kova.get(k) ?? { top: 0, adet: 0 };
+    g.top += sira;
+    g.adet += 1;
+    kova.set(k, g);
+  }
+  const egri = [...kova.entries()]
+    .map(([puan, g]) => ({ puan, sira: g.top / g.adet }))
+    .sort((a, b) => a.puan - b.puan);
+  _siraEgrisi[puanTuru] = egri;
+  return egri;
+};
+
+/**
+ * Yerleştirme puanından tahmini YKS başarı sıralaması. Eğri üzerinde log-uzayında
+ * doğrusal ara/dış değerleme yapar (sıralama, puana göre yaklaşık üsteldir). Yeterli
+ * veri yoksa null döner. Sonuç gerçek taban-sıralama ölçeğindedir.
+ */
+export const puandanSiralama = (puan: number, puanTuru: PuanTuru): number | null => {
+  const egri = siraEgrisi(puanTuru);
+  if (egri.length < 2) return null;
+
+  const logInterp = (a: SiraNok, b: SiraNok, x: number): number => {
+    if (a.puan === b.puan) return (a.sira + b.sira) / 2;
+    const t = (x - a.puan) / (b.puan - a.puan);
+    return Math.exp(Math.log(a.sira) + t * (Math.log(b.sira) - Math.log(a.sira)));
+  };
+
+  let sonuc: number;
+  if (puan <= egri[0].puan) {
+    sonuc = logInterp(egri[0], egri[1], puan); // alt uçtan dış değerle
+  } else if (puan >= egri[egri.length - 1].puan) {
+    sonuc = logInterp(egri[egri.length - 2], egri[egri.length - 1], puan); // üst uçtan
+  } else {
+    let lo = 0;
+    let hi = egri.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (egri[mid].puan <= puan) lo = mid;
+      else hi = mid;
+    }
+    sonuc = logInterp(egri[lo], egri[hi], puan);
+  }
+  return Math.max(1, Math.min(2_400_000, Math.round(sonuc)));
+};
+
+/**
+ * Toplam TYT/AYT netinden (puan türü + diploma notu ile) tahmini sıralama.
+ * Önce yerleştirme puanını hesaplar, sonra gerçek taban-puan eğrisine oturtur.
+ * Veri yoksa null.
+ */
+export const netlerdenSiralama = (
+  tytNet: number,
+  aytNet: number,
+  puanTuru: PuanTuru,
+  diplomaNotu: number,
+  gecenYilYerlesti = false,
+): number | null => {
+  const puan = yerlestirmePuani(tytNet, aytNet, diplomaNotu, gecenYilYerlesti);
+  return puandanSiralama(puan, puanTuru);
 };

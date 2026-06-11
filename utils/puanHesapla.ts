@@ -33,6 +33,24 @@ export const aytPuanHesapla = (
   return Math.round((bazPuan + obp * ayt) * 100) / 100;
 };
 
+/**
+ * Toplam TYT + AYT netinden tahmini yerleştirme puanı (puan türü bazlı, OBP dahil).
+ * Net dağılımı değil toplam net önemlidir; ÖSYM'nin ders-bazlı katsayıları yerine
+ * yaklaşık sabitler (TYT 3.85, AYT 3.5) kullanılır. `hedefNetHesapla`'nın ters
+ * yönüyle aynı modeldir; sıralama tahmininde taban-puan eğrisine girdi olur.
+ */
+export const yerlestirmePuani = (
+  tytNet: number,
+  aytNet: number,
+  diplomaNotu: number,
+  gecenYilYerlesti = false,
+): number => {
+  const obp = obpHesapla(Math.max(0, Math.min(100, diplomaNotu || 0)));
+  const { tyt, ayt } = obpKatsayilariGetir(gecenYilYerlesti);
+  const tytPuan = 100 + tytNet * 3.85 + obp * tyt;
+  return Math.round((tytPuan * 0.4 + aytNet * 3.5 + obp * ayt) * 100) / 100;
+};
+
 export const diplomaEtkisiAcikla = (diplomaNotu: number, gecenYilYerlesti = false): string => {
   const obp = obpHesapla(diplomaNotu);
   const { tyt, ayt } = obpKatsayilariGetir(gecenYilYerlesti);

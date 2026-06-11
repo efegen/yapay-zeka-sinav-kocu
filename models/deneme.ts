@@ -158,6 +158,14 @@ export function fmtDelta(n: number): string {
   return sign + fmtNet(Math.abs(n));
 }
 
+// Binlik ayıraçlı sıralama: 92200 → "92.200".
+export function fmtSira(n: number): string {
+  if (n == null || !isFinite(n)) return '–';
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
 // raw girişi temizler + (soru − diğer alan) ile sınırlar; yeni cevap haritası döndürür.
 export function setDY(
   cevaplar: Cevaplar,
@@ -179,4 +187,29 @@ export function setDY(
 const KISA_AYLAR = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 export function tarihKisa(d: Date): string {
   return `${d.getDate()} ${KISA_AYLAR[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * AI koçuna gönderilecek tek satırlık deneme özeti: tarih + kapsam toplamları + ders netleri.
+ * Yalnızca girişi yapılmış dersler listelenir; koç bu GERÇEK netlerle kıyas/projeksiyon kurar.
+ */
+export function denemeAiOzeti(d: DenemeSonuc): string {
+  // "Türkçe 31/40" biçimi: bölü sonrası dersin SORU sayısıdır — koç kart grafiklerinde
+  // max alanını doğru doldurabilsin (verilmezse null koyup barı bozabiliyor).
+  const dersOzet = (testler: Test[]) =>
+    testler
+      .filter((t) => {
+        const c = d.cevaplar?.[t.ad];
+        return !!c && (c.d !== '' || c.y !== '');
+      })
+      .map((t) => `${t.ad} ${fmtNet(netOf(d.cevaplar[t.ad]))}/${t.soru}`)
+      .join(', ');
+  const parcalar: string[] = [];
+  if (d.kapsam !== 'ayt') parcalar.push(`TYT ${fmtNet(d.tytNet)} net (${dersOzet(TYT_TESTLER)})`);
+  if (d.kapsam !== 'tyt') {
+    const alan = AYT_ALANLAR[d.alan] ?? AYT_ALANLAR.SAY;
+    parcalar.push(`AYT ${fmtNet(d.aytNet)} net (${dersOzet(alan.testler)})`);
+  }
+  const tarih = typeof d.tarih?.toDate === 'function' ? tarihKisa(d.tarih.toDate()) : '';
+  return `${tarih ? `${tarih} · ` : ''}${d.ad}: ${parcalar.join(' · ')}`;
 }

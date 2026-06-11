@@ -233,6 +233,7 @@ export default function Profil() {
           ) : (
             <AyarlarSekme
               profil={profil}
+              onKocHafiza={() => router.push('/koc-hafiza' as any)}
               onSifre={() => setAktifModal('sifre')}
               onKvkk={() => setAktifModal('kvkk')}
               onCikis={() => setAktifModal('cikis')}
@@ -456,9 +457,10 @@ function GenelSekme({
 // ─── Ayarlar sekmesi ─────────────────────────────────────────────────────────
 
 function AyarlarSekme({
-  profil, onSifre, onKvkk, onCikis, onHesapSil,
+  profil, onKocHafiza, onSifre, onKvkk, onCikis, onHesapSil,
 }: {
   profil: ProfilType | null;
+  onKocHafiza: () => void;
   onSifre: () => void;
   onKvkk: () => void;
   onCikis: () => void;
@@ -467,7 +469,8 @@ function AyarlarSekme({
   return (
     <View>
       <Group header="Tercihler">
-        <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron son />
+        <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron />
+        <Row icon="sparkles-outline" etiket="Koç Hafızam" chevron onPress={onKocHafiza} son />
       </Group>
 
       <Group header="Hesap ve Güvenlik">

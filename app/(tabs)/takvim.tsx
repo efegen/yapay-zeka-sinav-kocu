@@ -5,29 +5,21 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Timestamp } from 'firebase/firestore';
 import { auth } from '../../services/firebaseConfig';
 import {
   Gorev,
-  GorevTip,
-  gorevEkle,
   gorevSil,
   ayGorevleriniGetir,
   gunGorevleriniGetir,
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
-import { DERSLER, dersRenk } from '../../constants/dersler';
+import { dersRenk } from '../../constants/dersler';
 import { YKS_TARIHI } from '../../constants/sinav';
 import { Ring } from '../../components/koc/Ring';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
@@ -96,15 +88,6 @@ function gunMu(g: Gorev, gun: number): boolean {
   return !!g.tarih && g.tarih.toDate().getDate() === gun;
 }
 
-const BOŞ_FORM = {
-  baslik: '',
-  ders: 'Matematik',
-  tip: 'planned' as GorevTip,
-  deneme: false,
-  sure: '25',
-  saat: '', // yalnızca deneme için opsiyonel başlangıç saati ("HH:MM")
-};
-
 export default function Takvim() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -122,10 +105,6 @@ export default function Takvim() {
   const [ayGorevleri, setAyGorevleri] = useState<Gorev[]>([]);
   const [istediginZaman, setIstediginZaman] = useState<Gorev[]>([]);
   const [yukleniyor, setYukleniyor] = useState(false);
-
-  const [gorevModalAcik, setGorevModalAcik] = useState(false);
-  const [form, setForm] = useState({ ...BOŞ_FORM });
-  const [kaydediliyor, setKaydediliyor] = useState(false);
 
   const uid = auth.currentUser?.uid;
 
@@ -263,52 +242,6 @@ export default function Takvim() {
         },
       },
     ]);
-  }
-
-  async function kaydet() {
-    if (!uid || !form.baslik.trim()) return;
-    const sureNum = parseInt(form.sure, 10);
-    if (isNaN(sureNum) || sureNum <= 0) return;
-
-    setKaydediliyor(true);
-    try {
-      let tarih: Timestamp | null = null;
-      if (form.tip === 'planned') {
-        const gun = new Date(secilenTarih);
-        // Deneme gerçek bir takvim olayıdır → opsiyonel "HH:MM" saatini taşır.
-        // Plan görevlerinde saat yoktur (gece yarısı = saf tarih işareti).
-        const saatEslesme = form.deneme ? form.saat.trim().match(/^(\d{1,2}):(\d{2})$/) : null;
-        if (saatEslesme) {
-          const sa = Math.min(23, parseInt(saatEslesme[1], 10));
-          const dak = Math.min(59, parseInt(saatEslesme[2], 10));
-          gun.setHours(sa, dak, 0, 0);
-        } else {
-          gun.setHours(0, 0, 0, 0);
-        }
-        tarih = Timestamp.fromDate(gun);
-      }
-      await gorevEkle(uid, {
-        baslik: form.baslik.trim(),
-        ders: form.ders,
-        tur: form.deneme ? 'deneme' : 'plan',
-        sure: sureNum,
-        tip: form.tip,
-        tarih,
-        tamamlandi: false,
-      });
-      setGorevModalAcik(false);
-      setForm({ ...BOŞ_FORM });
-      await ayYukle();
-    } catch (err) {
-      console.error('[Takvim] kaydet hatası:', err);
-    } finally {
-      setKaydediliyor(false);
-    }
-  }
-
-  function modalKapat() {
-    setGorevModalAcik(false);
-    setForm({ ...BOŞ_FORM });
   }
 
   function planAc(g: Gorev) {
@@ -464,7 +397,13 @@ export default function Takvim() {
                 )
               )}
 
-              <TouchableOpacity style={styles.planaEkle} onPress={() => setGorevModalAcik(true)} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.planaEkle}
+                onPress={() =>
+                  router.push({ pathname: '/plan-kur', params: { tarih: String(secilenTarih.getTime()) } })
+                }
+                activeOpacity={0.8}
+              >
                 <Ionicons name="add" size={17} color={PRIMARY} />
                 <Text style={styles.planaEkleMetin}>Plana ekle</Text>
               </TouchableOpacity>
@@ -488,149 +427,6 @@ export default function Takvim() {
           )}
         </View>
       </ScrollView>
-
-      {/* ─── Görev ekleme modalı ─── */}
-      <Modal visible={gorevModalAcik} animationType="slide" transparent statusBarTranslucent>
-        <Pressable style={styles.overlay} onPress={modalKapat} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.sheet}
-        >
-          <View style={styles.sheetTutamac} />
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sheetBaslik}>Yeni Görev Ekle</Text>
-
-            <View style={styles.alan}>
-              <Text style={styles.alanEtiket}>Görev Adı</Text>
-              <View style={styles.inputSarici}>
-                <TextInput
-                  style={styles.input}
-                  value={form.baslik}
-                  onChangeText={(v) => setForm((f) => ({ ...f, baslik: v }))}
-                  placeholder="Çembersel hareket"
-                  placeholderTextColor={COLORS.textLight}
-                  returnKeyType="next"
-                />
-              </View>
-            </View>
-
-            <View style={styles.alan}>
-              <Text style={styles.alanEtiket}>Ders</Text>
-              <View style={styles.dersSatir}>
-                {DERSLER.map((d) => {
-                  const sec = form.ders === d;
-                  const renk = dersRenk(d);
-                  return (
-                    <TouchableOpacity
-                      key={d}
-                      style={[
-                        styles.dersChip,
-                        sec && { backgroundColor: renk + '1A', borderColor: renk },
-                      ]}
-                      onPress={() => setForm((f) => ({ ...f, ders: d }))}
-                      activeOpacity={0.8}
-                    >
-                      <View style={[styles.dersNokta, { backgroundColor: renk }]} />
-                      <Text style={[styles.dersChipMetin, sec && { color: renk }]}>{d}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.alan}>
-              <Text style={styles.alanEtiket}>Tür</Text>
-              <View style={styles.segmentSarici}>
-                <TouchableOpacity
-                  style={[styles.segmentButon, form.tip === 'planned' && styles.segmentButonAktif]}
-                  onPress={() => setForm((f) => ({ ...f, tip: 'planned' }))}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.segmentMetin, form.tip === 'planned' && styles.segmentMetinAktif]}>
-                    Planlandı
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentButon, form.tip === 'anytime' && styles.segmentButonAktif]}
-                  onPress={() => setForm((f) => ({ ...f, tip: 'anytime', deneme: false }))}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.segmentMetin, form.tip === 'anytime' && styles.segmentMetinAktif]}>
-                    İstediğin Zaman
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {form.tip === 'planned' && (
-              <TouchableOpacity
-                style={styles.denemeSatir}
-                onPress={() => setForm((f) => ({ ...f, deneme: !f.deneme }))}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.denemeKutu, form.deneme && styles.denemeKutuAktif]}>
-                  {form.deneme && <Ionicons name="checkmark" size={13} color="#fff" />}
-                </View>
-                <Text style={styles.denemeMetin}>Bu bir deneme sınavı</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Deneme gerçek bir takvim olayıdır → opsiyonel başlangıç saati taşır. */}
-            {form.tip === 'planned' && form.deneme && (
-              <View style={styles.alan}>
-                <Text style={styles.alanEtiket}>Başlangıç saati (opsiyonel)</Text>
-                <View style={styles.inputSarici}>
-                  <Ionicons name="time-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
-                  <TextInput
-                    style={styles.input}
-                    value={form.saat}
-                    onChangeText={(v) => setForm((f) => ({ ...f, saat: v }))}
-                    placeholder="10:00"
-                    placeholderTextColor={COLORS.textLight}
-                    keyboardType="numbers-and-punctuation"
-                    maxLength={5}
-                    returnKeyType="done"
-                  />
-                </View>
-              </View>
-            )}
-
-            <View style={styles.alan}>
-              <Text style={styles.alanEtiket}>Süre (dakika)</Text>
-              <View style={styles.inputSarici}>
-                <Ionicons name="hourglass-outline" size={16} color={COLORS.textLight} style={styles.inputIkon} />
-                <TextInput
-                  style={styles.input}
-                  value={form.sure}
-                  onChangeText={(v) => setForm((f) => ({ ...f, sure: v }))}
-                  placeholder="25"
-                  placeholderTextColor={COLORS.textLight}
-                  keyboardType="numeric"
-                  returnKeyType="done"
-                />
-              </View>
-            </View>
-
-            <View style={styles.butonlar}>
-              <TouchableOpacity style={styles.iptalButon} onPress={modalKapat} activeOpacity={0.8}>
-                <Text style={styles.iptalMetin}>İptal</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.kaydetButon, kaydediliyor && { opacity: 0.7 }]}
-                onPress={kaydet}
-                activeOpacity={0.8}
-                disabled={kaydediliyor}
-              >
-                {kaydediliyor ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.kaydetMetin}>Kaydet</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 }
@@ -1053,104 +849,6 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     paddingHorizontal: 2,
   },
-
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheet: {
-    backgroundColor: COLORS.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    paddingBottom: 36,
-    maxHeight: '88%',
-  },
-  sheetTutamac: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: COLORS.cardBorder,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  sheetBaslik: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 20 },
-
-  alan: { marginBottom: 14 },
-  alanEtiket: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 6 },
-  inputSarici: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    paddingHorizontal: 12,
-    height: 48,
-  },
-  inputIkon: { marginRight: 8 },
-  input: { flex: 1, fontSize: 15, color: COLORS.text },
-
-  dersSatir: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  dersChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 99,
-    borderWidth: 1.5,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.background,
-  },
-  dersNokta: { width: 8, height: 8, borderRadius: 99 },
-  dersChipMetin: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-
-  denemeSatir: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  denemeKutu: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: COLORS.cardBorder,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  denemeKutuAktif: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  denemeMetin: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-
-  segmentSarici: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    padding: 3,
-    gap: 3,
-  },
-  segmentButon: { flex: 1, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  segmentButonAktif: { backgroundColor: PRIMARY },
-  segmentMetin: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-  segmentMetinAktif: { color: '#fff' },
-
-  butonlar: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  iptalButon: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  iptalMetin: { fontSize: 15, fontWeight: '600', color: COLORS.textSecondary },
-  kaydetButon: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: PRIMARY,
-  },
-  kaydetMetin: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });
 
 const planStyles = StyleSheet.create({

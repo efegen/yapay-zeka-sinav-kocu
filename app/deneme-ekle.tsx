@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { Timestamp } from 'firebase/firestore';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Timestamp, deleteField } from 'firebase/firestore';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { COLORS } from '../constants/colors';
 import { useProfile } from '../hooks/useProfile';
 import { bildir } from '../utils/bildirim';
-import { denemeEkle, denemeleriGetir } from '../services/firestoreService';
+import { denemeEkle, denemeleriGetir, denemeGuncelle } from '../services/firestoreService';
 import { auth } from '../services/firebaseConfig';
 import {
   TYT_TESTLER,
@@ -54,7 +54,16 @@ export default function DenemeEkle() {
   const { profil } = useProfile();
   const uid = auth.currentUser?.uid;
 
-  const alan: Alan = alanNormalize(profil?.puanTuru);
+  // Düzenleme modu: liste ekranından bir denemenin id'si ile gelinir.
+  const { id: duzenlenenId } = useLocalSearchParams<{ id?: string }>();
+  const duzenleme = typeof duzenlenenId === 'string' && duzenlenenId.length > 0;
+  const [yuklendi, setYuklendi] = useState(false);
+
+  // Yeni denemede alan profilden gelir; düzenlemede ise denemenin kendi alanı
+  // (eski kayıt farklı puan türünde olabilir) korunur.
+  const profilAlan: Alan = alanNormalize(profil?.puanTuru);
+  const [seciliAlan, setSeciliAlan] = useState<Alan | null>(null);
+  const alan: Alan = seciliAlan ?? profilAlan;
 
   const [kapsam, setKapsam] = useState<Kapsam>('ikisi');
   const [aktif, setAktif] = useState<'tyt' | 'ayt'>('tyt');
@@ -69,16 +78,35 @@ export default function DenemeEkle() {
   const [onceki, setOnceki] = useState<DenemeSonuc | null>(null);
   const [kaydediliyor, setKaydediliyor] = useState(false);
 
-  // Mevcut deneme sayısı (sonraki numara) + önceki deneme (kıyas için).
+  // Düzenlemede: ilgili denemeyi forma doldur. Yeni eklemede: sonraki numara +
+  // önceki deneme (kıyas için).
   useEffect(() => {
     if (!uid) return;
+    if (duzenleme && yuklendi) return; // forma bir kez doldur, tekrar çekme
     denemeleriGetir(uid)
       .then((list) => {
-        setDenemeNo(list.length + 1);
-        setOnceki(list[0] ?? null);
+        if (duzenleme) {
+          const idx = list.findIndex((x) => x.id === duzenlenenId);
+          const d = idx >= 0 ? list[idx] : null;
+          if (d && !yuklendi) {
+            setAd(d.ad);
+            setTarih(d.tarih.toDate());
+            setSure(d.sure ? String(d.sure) : '');
+            setKapsam(d.kapsam);
+            setCevap(d.cevaplar ?? {});
+            setSeciliAlan(d.alan);
+            setDenemeNo(d.denemeNo);
+            setAktif(d.kapsam === 'ayt' ? 'ayt' : 'tyt');
+            setOnceki(list[idx + 1] ?? null); // bir önceki (daha eski) deneme
+            setYuklendi(true);
+          }
+        } else {
+          setDenemeNo(list.length + 1);
+          setOnceki(list[0] ?? null);
+        }
       })
       .catch((err) => console.error('[DenemeEkle] denemeleriGetir hatası:', err));
-  }, [uid]);
+  }, [uid, duzenleme, duzenlenenId, yuklendi]);
 
   // Kapsam değişince aktif föyü düzelt.
   useEffect(() => {
@@ -155,22 +183,37 @@ export default function DenemeEkle() {
     const tytNet = kapsam !== 'ayt' ? toplamNet(TYT_TESTLER, cevap) : 0;
     const aytNet = kapsam !== 'tyt' ? toplamNet(aytTestler, cevap) : 0;
     const sureNum = parseInt(sure, 10);
+    const sureGecerli = !isNaN(sureNum) && sureNum > 0;
+    const yeniAd = ad.trim() || otoAd;
+
+    const ortak = {
+      ad: yeniAd,
+      kapsam,
+      alan,
+      cevaplar,
+      tytNet: Math.round(tytNet * 100) / 100,
+      aytNet: Math.round(aytNet * 100) / 100,
+      toplamNet: Math.round((tytNet + aytNet) * 100) / 100,
+      tarih: Timestamp.fromDate(tarih),
+    };
 
     setKaydediliyor(true);
     try {
-      await denemeEkle(uid, {
-        ad: ad.trim() || otoAd,
-        denemeNo,
-        kapsam,
-        alan,
-        ...(isNaN(sureNum) || sureNum <= 0 ? {} : { sure: sureNum }),
-        cevaplar,
-        tytNet: Math.round(tytNet * 100) / 100,
-        aytNet: Math.round(aytNet * 100) / 100,
-        toplamNet: Math.round((tytNet + aytNet) * 100) / 100,
-        tarih: Timestamp.fromDate(tarih),
-      });
-      bildir('Kaydedildi', `${ad.trim() || otoAd} eklendi.`);
+      if (duzenleme && duzenlenenId) {
+        await denemeGuncelle(uid, duzenlenenId, {
+          ...ortak,
+          // Süre temizlendiyse alanı kayıttan kaldır.
+          sure: sureGecerli ? sureNum : (deleteField() as unknown as number),
+        });
+        bildir('Güncellendi', `${yeniAd} güncellendi.`);
+      } else {
+        await denemeEkle(uid, {
+          ...ortak,
+          denemeNo,
+          ...(sureGecerli ? { sure: sureNum } : {}),
+        });
+        bildir('Kaydedildi', `${yeniAd} eklendi.`);
+      }
       router.back();
     } catch (err) {
       console.error('[DenemeEkle] kaydet hatası:', err);
@@ -241,7 +284,7 @@ export default function DenemeEkle() {
         <TouchableOpacity style={styles.kapatBtn} onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="close" size={20} color={COLORS.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.baslikMetin}>Yeni Deneme</Text>
+        <Text style={styles.baslikMetin}>{duzenleme ? 'Denemeyi Düzenle' : 'Yeni Deneme'}</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -517,7 +560,7 @@ export default function DenemeEkle() {
             style={[styles.kaydetBtn, kaydediliyor && { opacity: 0.7 }]}
           >
             <Ionicons name="checkmark" size={19} color="#fff" />
-            <Text style={styles.kaydetMetin}>Denemeyi kaydet</Text>
+            <Text style={styles.kaydetMetin}>{duzenleme ? 'Değişiklikleri kaydet' : 'Denemeyi kaydet'}</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>

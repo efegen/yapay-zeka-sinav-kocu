@@ -13,6 +13,10 @@ import type { KartBilesenProps } from './_ortak';
 export function CozumAdimlari({ veri, onGuncelle }: KartBilesenProps<CozumAdimlariVeri>) {
   const acik = veri.acikAdim ?? -1;
   const adimlar = veri.adimlar ?? [];
+  // "= " öneki yalnızca çıplak değerle (sayı/LaTeX) başlayan sonuca yakışır;
+  // "Cevap: C" ya da "Altıgenin çevresi 24 birimdir" gibi cümlelere eklenmez.
+  const sonuc = (veri.sonuc ?? '').trim();
+  const esitle = /^[\d$\\(\[+−-]/.test(sonuc);
 
   function toggle(i: number) {
     onGuncelle({ ...veri, acikAdim: acik === i ? -1 : i });
@@ -55,13 +59,13 @@ export function CozumAdimlari({ veri, onGuncelle }: KartBilesenProps<CozumAdimla
           );
         })}
       </View>
-      {!!veri.sonuc && (
+      {!!sonuc && (
         <View style={s.sonucKutu}>
           <Text style={s.sonucEtiket}>Sonuç</Text>
           <Formul
-            icerik={`= ${veri.sonuc}`}
+            icerik={esitle ? `= ${sonuc}` : sonuc}
             renk={COLORS.success}
-            boyut={20}
+            boyut={sonuc.length > 28 ? 15 : 20}
             kalin
             hizala="center"
             style={{ alignSelf: 'stretch', marginTop: 2 }}

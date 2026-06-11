@@ -25,22 +25,30 @@ export interface OgrenciBaglam {
   gunlukSoruHedefi?: number;
   zorlananKonular?: string[];
   iyiKonular?: string[];
+  denemeler?: string[];
+  kisiselNotlar?: string[];
 }
 
 /**
  * Profilden AI'a gönderilecek bağlamı derler. (Tam kişisel bağlam — isim dahil.)
  * @param zorlananKonular  Koç hafızasından gelen zorlanılan konular (opsiyonel).
  * @param iyiKonular       Koç hafızasından gelen iyi olunan konular (opsiyonel).
+ * @param denemeler        Son deneme sonuçlarının tek satırlık özetleri, yeni → eski (opsiyonel).
+ * @param kisiselNotlar    Koçun öğrenci hakkında aldığı kalıcı kişisel notlar (opsiyonel).
  */
 export function baglamKur(
   profil: Profil | null,
   zorlananKonular?: string[],
-  iyiKonular?: string[]
+  iyiKonular?: string[],
+  denemeler?: string[],
+  kisiselNotlar?: string[]
 ): OgrenciBaglam {
   if (!profil) {
     const b: OgrenciBaglam = {};
     if (zorlananKonular?.length) b.zorlananKonular = zorlananKonular;
     if (iyiKonular?.length) b.iyiKonular = iyiKonular;
+    if (denemeler?.length) b.denemeler = denemeler;
+    if (kisiselNotlar?.length) b.kisiselNotlar = kisiselNotlar;
     return b;
   }
   return {
@@ -55,6 +63,8 @@ export function baglamKur(
     gunlukSoruHedefi: profil.gunlukSoruHedefi,
     zorlananKonular: zorlananKonular?.length ? zorlananKonular : undefined,
     iyiKonular: iyiKonular?.length ? iyiKonular : undefined,
+    denemeler: denemeler?.length ? denemeler : undefined,
+    kisiselNotlar: kisiselNotlar?.length ? kisiselNotlar : undefined,
   };
 }
 
@@ -81,7 +91,8 @@ export async function kocaSor(
   }
 
   const denetleyici = new AbortController();
-  const zamanAsimi = setTimeout(() => denetleyici.abort(), 20000);
+  // Worker bozuk yanıtta bir kez kendi içinde yeniden deniyor; iki tur için pay bırak.
+  const zamanAsimi = setTimeout(() => denetleyici.abort(), 45000);
 
   let yanit: Response;
   try {
@@ -115,6 +126,7 @@ export async function kocaSor(
     yanit: veri.yanit,
     kartlar: Array.isArray(veri.kartlar) ? veri.kartlar : [],
     hafiza: veri.hafiza,
+    hafizaNot: veri.hafizaNot,
   };
 }
 
@@ -138,7 +150,9 @@ export async function soruyuCoz(base64: string, baglam: OgrenciBaglam, not?: str
   }
 
   const denetleyici = new AbortController();
-  const zamanAsimi = setTimeout(() => denetleyici.abort(), 60000); // vision çözümü için pay bırak
+  // Zor sorularda reasoning + olası yedek model turu 60 sn'yi aşabiliyor; worker parayı/kotayı
+  // zaten harcamışken istemcinin erken pes etmesi cevabı çöpe atar — payı geniş tut.
+  const zamanAsimi = setTimeout(() => denetleyici.abort(), 90000);
 
   let yanit: Response;
   try {
