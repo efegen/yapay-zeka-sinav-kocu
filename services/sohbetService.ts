@@ -140,7 +140,8 @@ export function sohbetOzeti(s: Sohbet): string {
  * Sohbet /chat'e yalnızca { rol, metin } olarak gider; kartlar düşer. Öğrenci "şu adımı
  * anlamadım" dediğinde modelin çözümü/soruyu bilmesi şart; aksi halde adım başlığına bakıp
  * konuyla bağlantısız genel bir tanım verir. Bu yüzden çözüm/konu kartlarını metne gömeriz.
- * Sadece açıklama gerektiren öğrenme kartları serileştirilir (plan/grafik kartları değil).
+ * Plan kartları da gömülür: "çarşambayı hafiflet" dendiğinde model kendi planını görebilmeli
+ * (yoksa baştan, tutarsız bir plan üretir). Salt-grafik kartları (momentum vb.) gömülmez.
  */
 export function kartMetni(k: Kart): string {
   switch (k.tip) {
@@ -174,6 +175,33 @@ export function kartMetni(k: Kart): string {
     }
     case 'ipucu':
       return `İpucu — ${k.veri.baslik}: ${k.veri.metin}`;
+    case 'haftalikPlan': {
+      const v = k.veri;
+      const gunler = (v.gunler ?? [])
+        .map((g) => `${g.gun}: ${g.odak} · ${g.sure}${g.isler?.length ? ` (${g.isler.join(', ')})` : ''}`)
+        .join('\n');
+      return `"${v.baslik}" haftalık planını ÜRETTİN${v.tarihAraligi ? ` (${v.tarihAraligi})` : ''}:\n${gunler}`;
+    }
+    case 'pomodoroPlani': {
+      const v = k.veri;
+      const akis = (v.bloklar ?? [])
+        .map((b) => `${b.sure} ${b.tip === 'mola' ? 'mola' : b.ders}`)
+        .join(' → ');
+      return `"${v.baslik}" Pomodoro planını ÜRETTİN: ${akis}`;
+    }
+    case 'takvimAksiyonu': {
+      const v = k.veri;
+      const kapsam =
+        v.kapsam === 'bugun'
+          ? 'bugünün planlarını'
+          : v.kapsam === 'hafta'
+          ? 'bu haftanın planlarını'
+          : 'tüm planları';
+      // Eylemi UYGULAMA yaptı (sen değil): yeniden "sildim/kaldırdım" deme.
+      return v.sonuc === 'yapildi'
+        ? `Takvim temizleme kartını sundun ve öğrenci ONAYLADI → ${kapsam} uygulama kaldırdı (${v.silinen ?? 0} plan). Bunu tekrar "ben sildim" diye söyleme.`
+        : `Takvimi temizleme TEKLİFİ sundun (${kapsam} kaldırma); öğrenci karttaki butonla onaylarsa uygulama siler — sen silmiş gibi konuşma.`;
+    }
     default:
       return '';
   }
@@ -240,7 +268,8 @@ export function sohbetGorseli(s: Sohbet): { ikon: IoniconAdi; renk: string } {
     tipler.has('hedefOzeti')
   )
     return { ikon: 'trending-up', renk: COLORS.success };
-  if (tipler.has('haftalikPlan')) return { ikon: 'calendar-outline', renk: COLORS.accent };
+  if (tipler.has('haftalikPlan') || tipler.has('takvimAksiyonu'))
+    return { ikon: 'calendar-outline', renk: COLORS.accent };
   if (tipler.has('momentum')) return { ikon: 'flame', renk: COLORS.amber };
   if (
     tipler.has('cozumAdimlari') ||

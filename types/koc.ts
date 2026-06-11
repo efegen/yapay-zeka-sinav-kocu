@@ -167,6 +167,22 @@ export interface ProjeksiyonVeri {
   sonuc?: { durum: 'yetisir' | 'riskli' | 'yetismez'; metin: string };
 }
 
+/**
+ * Takvim eylemi — koçun ÖNERDİĞİ, öğrencinin kartla ONAYLADIĞI işlem. Koç takvimi kendi
+ * değiştiremez; bu kart "boşaltayım mı?" teklifi sunar, silmeyi UYGULAMA yapar.
+ * - kapsam 'bugun': yalnız bugünün planları · 'hafta': bu haftanın (Pzt–Paz) planları ·
+ *   'tumu': tüm planlar (tarih farketmez). Deneme/sınav günleri her kapsamda HARİÇ.
+ */
+export interface TakvimAksiyonuVeri {
+  islem: 'temizle';
+  kapsam: 'bugun' | 'hafta' | 'tumu';
+  baslik: string;
+  aciklama?: string;
+  onayEtiket?: string;
+  sonuc?: 'yapildi'; // kalıcı state — eylem uygulandıktan sonra
+  silinen?: number; // kalıcı state — kaldırılan plan sayısı (sonuç ekranı için)
+}
+
 /** tip → veri eşlemesi. Worker enum'u ile birebir (MASTER_PROMPT_REVIZYON §2). */
 export interface KartTipleri {
   gunlukBrifing: GunlukBrifingVeri;
@@ -187,6 +203,7 @@ export interface KartTipleri {
   sinavCantasi: SinavCantasiVeri;
   hedefOzeti: HedefOzetiVeri;
   projeksiyon: ProjeksiyonVeri;
+  takvimAksiyonu: TakvimAksiyonuVeri;
 }
 
 export type KartTipi = keyof KartTipleri;
@@ -200,6 +217,8 @@ export interface KocYanit {
   kartlar: Kart[];
   /** Opsiyonel hafıza işareti — öğrenci açıkça zorlandı/anladı dediyse. */
   hafiza?: { konu: string; ders?: string; sinyal: KonuSinyali };
+  /** Opsiyonel kişisel not — öğrenci koçluğu kalıcı etkileyen bir bilgi paylaştıysa. */
+  hafizaNot?: { metin: string; kategori: NotKategori };
 }
 
 // ── Koç hafızası (öğrenci profili) ─────────────────────────────────────
@@ -212,8 +231,27 @@ export interface KonuKaydi {
   sonGorulme: string; // ISO tarih
 }
 
+/**
+ * Kişisel not kategorisi:
+ * - tercih: çalışma/öğrenme tercihi ("Gece çalışmayı seviyor")
+ * - rutin:  düzenli program/kısıt ("Cumartesi dershanesi var")
+ * - duygu:  süregelen duygu/motivasyon ("Sınav kaygısı yaşıyor")
+ */
+export type NotKategori = 'tercih' | 'rutin' | 'duygu';
+
+export const NOT_KATEGORILERI: NotKategori[] = ['tercih', 'rutin', 'duygu'];
+
+/** Öğrencinin kendisi hakkında koça verdiği kalıcı bilgi (konu performansı DEĞİL). */
+export interface KisiselNot {
+  metin: string; // kısa, üçüncü şahıs ("Hafta içi okuldan 17:00'de çıkıyor")
+  kategori: NotKategori;
+  sayac: number; // kaç kez teyit edildi
+  sonGorulme: string; // ISO tarih
+}
+
 export interface KocHafiza {
   konular?: Record<string, KonuKaydi>;
+  notlar?: Record<string, KisiselNot>;
   guncelleme?: number;
 }
 
@@ -239,4 +277,5 @@ export const KART_TIPLERI: KartTipi[] = [
   'sinavCantasi',
   'hedefOzeti',
   'projeksiyon',
+  'takvimAksiyonu',
 ];

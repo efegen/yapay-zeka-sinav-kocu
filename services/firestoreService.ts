@@ -6,6 +6,7 @@ import {
   addDoc,
   getDocs,
   deleteDoc,
+  writeBatch,
   query,
   where,
   Timestamp,
@@ -314,6 +315,85 @@ export const gorevSil = async (uid: string, gorevId: string): Promise<void> => {
   await deleteDoc(gorevRef);
 };
 
+// AI Koç "takvimi temizle" eyleminin kapsamı: bugün / bu hafta / tüm planlar.
+export type TakvimKapsam = 'bugun' | 'hafta' | 'tumu';
+
+// Bugünü içeren takvim haftasının sınırları (Pazartesi 00:00 – Pazar 23:59:59.999).
+// Takvim ızgarası Pazartesi-başlangıçlı (pazartesiIndeksi = (jsGun + 6) % 7) — onunla hizalı.
+function buHaftaAraligi(ref: Date): { pazartesi: Date; pazar: Date } {
+  const pazartesiyeKadar = (ref.getDay() + 6) % 7; // Pazartesi'ye kaç gün geri
+  const pazartesi = new Date(ref);
+  pazartesi.setHours(0, 0, 0, 0);
+  pazartesi.setDate(pazartesi.getDate() - pazartesiyeKadar);
+  const pazar = new Date(pazartesi);
+  pazar.setDate(pazar.getDate() + 6);
+  pazar.setHours(23, 59, 59, 999);
+  return { pazartesi, pazar };
+}
+
+/**
+ * Koçun "takvimi boşalt" eylemi için kapsamdaki PLAN görevlerini getirir.
+ * Deneme (sınav) olayları HARİÇ tutulur — onlar "program" sayılmaz, kazara silinmesin.
+ * - 'bugun': bugüne tarihli planlı görevler.
+ * - 'hafta': bu takvim haftasının (Pzt–Paz) planlı görevleri.
+ * - 'tumu' : tarihten bağımsız tüm görevler (planlı + istediğin-zaman).
+ */
+export const kapsamGorevleriniGetir = async (
+  uid: string,
+  kapsam: TakvimKapsam
+): Promise<Gorev[]> => {
+  if (kapsam === 'bugun') {
+    const { planned } = await gunGorevleriniGetir(uid, new Date());
+    return planned.filter((g) => g.tur !== 'deneme');
+  }
+
+  const kolRef = collection(db, 'users', uid, 'gorevler');
+
+  if (kapsam === 'hafta') {
+    // Tek-alan tarih aralığı (composite index gerektirmez); istediğin-zaman tarih=null → kapsam dışı.
+    const { pazartesi, pazar } = buHaftaAraligi(new Date());
+    const haftaQuery = query(
+      kolRef,
+      where('tarih', '>=', Timestamp.fromDate(pazartesi)),
+      where('tarih', '<=', Timestamp.fromDate(pazar))
+    );
+    const snap = await getDocs(haftaQuery);
+    return (
+      snap.docs
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((d) => ({ id: d.id, ...(d.data() as any) }) as Gorev)
+        .filter((g) => g.tip === 'planned' && g.tur !== 'deneme')
+    );
+  }
+
+  // 'tumu' — tarih farketmez (planlı + istediğin-zaman); yalnız deneme hariç.
+  const snap = await getDocs(kolRef);
+  return (
+    snap.docs
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((d) => ({ id: d.id, ...(d.data() as any) }) as Gorev)
+      .filter((g) => g.tur !== 'deneme')
+  );
+};
+
+/**
+ * Birden çok görevi tek seferde siler (Firestore batch). Boş/yinelenen id'ler ayıklanır;
+ * 500'lük batch sınırına karşı parçalanır. Silinen görev sayısını döner.
+ */
+export const gorevleriSil = async (uid: string, ids: string[]): Promise<number> => {
+  const benzersiz = Array.from(new Set(ids.filter(Boolean)));
+  if (!benzersiz.length) return 0;
+  const PARCA = 400; // 500 sınırının altında güvenli pay
+  for (let i = 0; i < benzersiz.length; i += PARCA) {
+    const toplu = writeBatch(db);
+    for (const id of benzersiz.slice(i, i + PARCA)) {
+      toplu.delete(doc(db, 'users', uid, 'gorevler', id));
+    }
+    await toplu.commit();
+  }
+  return benzersiz.length;
+};
+
 // ─────────────────────────────────────────────
 // Deneme sonuçları (mock exam results)
 // ─────────────────────────────────────────────
@@ -341,6 +421,15 @@ export const denemeleriGetir = async (uid: string): Promise<DenemeSonuc[]> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((d) => ({ id: d.id, ...(d.data() as any) }) as DenemeSonuc)
     .sort((a, b) => (b.tarih?.toMillis() ?? 0) - (a.tarih?.toMillis() ?? 0));
+};
+
+export const denemeGuncelle = async (
+  uid: string,
+  denemeId: string,
+  patch: Partial<Omit<DenemeSonuc, 'id' | 'olusturmaTarihi'>>
+): Promise<void> => {
+  const ref = doc(db, 'users', uid, 'denemeler', denemeId);
+  await updateDoc(ref, temizle(patch as Record<string, unknown>));
 };
 
 export const denemeSil = async (uid: string, denemeId: string): Promise<void> => {

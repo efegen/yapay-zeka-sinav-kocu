@@ -48,6 +48,7 @@ interface OgrenciBaglam {
   zorlananKonular?: string[]; // koç hafızasından (öğrencinin zorlandığı konular)
   iyiKonular?: string[]; // koç hafızasından (öğrencinin iyi olduğu konular)
   denemeler?: string[]; // son deneme sonuçlarının tek satırlık özetleri (yeni → eski)
+  kisiselNotlar?: string[]; // koç hafızasından (öğrenci hakkındaki kalıcı kişisel notlar)
 }
 
 interface SohbetMesaji {
@@ -76,7 +77,7 @@ const GECERLI_TIPLER = new Set([
   'gunlukBrifing', 'baglamSeridi', 'niyetIzgarasi', 'pomodoroPlani', 'konuAdimlari',
   'miniDenemeAnalizi', 'cozumAdimlari', 'ipucu', 'momentum', 'molaRecetesi',
   'denemeKiyasi', 'enBuyukKazanc', 'haftalikPlan', 'formulKarti',
-  'oturumZamanPlani', 'sinavCantasi', 'hedefOzeti', 'projeksiyon',
+  'oturumZamanPlani', 'sinavCantasi', 'hedefOzeti', 'projeksiyon', 'takvimAksiyonu',
 ]);
 
 /** Sık kartların ZORUNLU alanları dolu mu (yalın prompt'ın olası şema-sadakat kaybını telafi eder). */
@@ -91,6 +92,11 @@ function gecerliKart(tip: string, veri: Record<string, unknown>): boolean {
       return typeof veri.konu === 'string' && dolu(veri.formuller);
     case 'haftalikPlan':
       return dolu(veri.gunler);
+    case 'takvimAksiyonu':
+      return (
+        (veri.kapsam === 'bugun' || veri.kapsam === 'hafta' || veri.kapsam === 'tumu') &&
+        typeof veri.baslik === 'string'
+      );
     default:
       return true; // diğer kartlar için tip+veri kontrolü yeterli
   }
@@ -160,12 +166,22 @@ function sistemPromptu(b: OgrenciBaglam, env: Env): string {
     '- Somut ol: "çok çalış" deme; hangi konu, kaç soru, kaç dakika Pomodoro gibi uygulanabilir öneriler ver.',
     '- ELİNDE OLMAYAN veriyi UYDURMA. Üniversite taban puanı/sıralaması veya öğrencinin geçmiş deneme',
     '  sonuçları gibi sana verilmemiş bilgileri varmış gibi söyleme; gerekirse öğrenciden bilgi iste.',
+    '- Takvimi/planı SEN değiştiremezsin: görev ekleyemez, silemez, taşıyamazsın. Bu yüzden "sildim",',
+    '  "kaldırdım", "ekledim", "güncelledim", "temizledim" gibi YAPMADIĞIN bir eylemi YAPMIŞ gibi ASLA söyleme.',
+    '  Öğrenci takvimini boşaltmak/sıfırlamak ya da bir günü dinlenmeye ayırmak isterse "takvimAksiyonu" kartı',
+    '  sun; işi öğrenci karttaki butonla onaylayınca UYGULAMA yapar. (Plan EKLEME için "haftalikPlan" + "Takvime ekle".)',
+    '- Öğrenci "canım çalışmak istemiyor / yoruldum / ara vermek istiyorum / bıktım" derse: önce DUYGUSUNU say,',
+    '  yargılama ve suçlu hissettirme; kısa bir nefes/dinlenme öner. İstemesi hâlinde bugünü ("kapsam":"bugun"),',
+    '  bu haftayı ("kapsam":"hafta") ya da tüm planı ("kapsam":"tumu") boşaltmayı "takvimAksiyonu" ile teklif et —',
+    '  öğrencinin dile getirdiği aralığa uy. Dinlenip küçük, taze bir yeniden başlangıç olsun. ZORLAMA; karar öğrencinin.',
     '- Ciddi psikolojik/sağlık durumlarında profesyonel destek almasını da öner.',
     '- Sınav dışı, alakasız veya uygunsuz taleplerde nazikçe sınav hazırlığına geri yönlendir.',
     '- Plan/program/öneri üretirken öğrencinin "zorlandığı konular"ı (hafıza) öncele ve NEDEN eklediğini',
     '  kısaca söyle (örn. "Limit\'te zorlanmıştın, çarşambaya koydum"). Bu liste sana verilmediyse uydurma.',
     '- "İyi olduğu konular"ı (hafıza) gereksiz yere baştan anlatma, kısa geç; "zorlandığı konular"da ise',
     '  daha temkinli, temelden ve sabırlı açıkla. Bu listeler sana verilmediyse uydurma.',
+    '- "Koç notları" (öğrenci hakkındaki kişisel notlar) verildiyse plan/öneriyi onlara uydur (örn. dershane',
+    '  gününe ağır program koyma, gece çalışan öğrenciye sabah bloğu dayatma). Notları yeri gelmeden sayıp dökme.',
     '- Öğrenci bir çözümü/konuyu anlamadığını söylerse tüm çözümü baştan DÖKME. Hangi ADIMI/kavramı anlamadığını',
     '  AÇIKÇA belirtmişse (örn. "X adımını anlamadım") tekrar "hangi adım?" diye SORMA; doğrudan YALNIZCA o adımı',
     '  sade, kısa ve NEDEN-li (neden bu işlem yapıldı) açıkla. Belirtmemişse önce kısaca nerede takıldığını sor.',
@@ -224,6 +240,10 @@ function ogrenciBaglamMetni(b: OgrenciBaglam, env: Env): string {
   if (b.iyiKonular && b.iyiKonular.length) {
     satirlar.push(`- İyi olduğu konular (hafıza): ${b.iyiKonular.join(', ')}`);
   }
+  if (b.kisiselNotlar && b.kisiselNotlar.length) {
+    const liste = b.kisiselNotlar.slice(0, 6).map((s) => String(s).slice(0, 120));
+    satirlar.push(`- Koç notları (öğrenci hakkında): ${liste.join(' · ')}`);
+  }
   if (b.denemeler && b.denemeler.length) {
     const liste = b.denemeler.slice(0, 3).map((s) => `  · ${String(s).slice(0, 220)}`);
     satirlar.push(`- Son denemeleri (yeni → eski):\n${liste.join('\n')}`);
@@ -234,18 +254,32 @@ function ogrenciBaglamMetni(b: OgrenciBaglam, env: Env): string {
 // ── Yapılandırılmış çıktı yönergesi ──
 const KART_REHBERI = [
   'ÇIKTI FORMATI:',
-  '- Yanıtı GEÇERLİ JSON ver: { "yanit": "...", "kartlar": [ { "tip": "...", "veri": {...} } ] }',
+  '- Yanıtı GEÇERLİ JSON ver: { "yanit": "...", "kartlar": [ { "tip": "...", "veri": {...} } ],',
+  '  "hafiza": {...} (opsiyonel), "hafizaNot": {...} (opsiyonel) } — son ikisi için HAFIZA bölümüne bak.',
   '- "yanit" hep dolu: kartı tanıtan sıcak, kısa cümle — kart içeriğini TEKRARLAMA. Vurgu için **kalın** (tek * yok).',
   '- En fazla 2 kart, en değerlisini seç. Genel/duygusal/belirsiz sohbette kart üretme ("kartlar": []).',
   '',
-  'HAFIZA (opsiyonel, ÇOK TEMKİNLİ):',
-  '- YALNIZCA öğrenci açıkça zorlandığını ("X\'i anlamıyorum") ya da artık anladığını söylerse ekle:',
-  '  "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }. Şüphedeysen KOYMA.',
+  'HAFIZA — her yanıtta değerlendir:',
+  '- Öğrencinin SON mesajında kendisi hakkında KALICI bir bilgi var mı? (düzenli program/kısıt,',
+  '  çalışma-öğrenme tercihi, süregelen duygu/kaygı). VARSA yanıt JSON\'una üst düzey "hafizaNot" EKLE.',
+  '  Örnek — öğrenci "cumartesileri kursa gidiyorum" derse:',
+  '  "hafizaNot": { "metin": "Cumartesi günleri kursa gidiyor", "kategori": "rutin" }',
+  '  kategori: "tercih" (çalışma/öğrenme tercihi) | "rutin" (program/kısıt) | "duygu" (duygu/motivasyon).',
+  '  metin ≤80 karakter, üçüncü şahıs, Türkçe; birden çok bilgi varsa TEK kısa cümlede birleştir.',
+  '  Okul çıkış saati, dershane/kurs günü, düzenli spor, saat tercihi, öğrenme stili gibi açık bilgileri',
+  '  KAÇIRMA — sonraki sohbetlerde planı kişiselleştirmen bunlara bağlı.',
+  '- hafizaNot\'a YAZMA: profilde zaten olan (isim/sınıf/hedef/netler), tek seferlik durum ("bugün yorgunum",',
+  '  "dün uyuyamadım"), ders/konu performansı, hassas bilgi (sağlık teşhisi, kimlik/iletişim, aile özeli),',
+  '  bağlamdaki "Koç notları"nda zaten yazılı olan. Böyle bir bilgi yoksa alanı HİÇ koyma.',
+  '- Konu sinyali (ÇOK TEMKİNLİ): öğrenci açıkça zorlandığını ("X\'i anlamıyorum") ya da artık anladığını',
+  '  söylerse ekle: "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }.',
+  '  Şüphedeysen KOYMA.',
   '',
   'KART SEÇİMİ (niyet → tip):',
   '- Konu ÖĞRETME ("anlat"/"anlamıyorum"/"sıfırdan"): açıklama "yanit"a (+ "formulKarti"/"ipucu") — konuAdimlari DEĞİL.',
   '- Konu ÇALIŞMA PLANI ("nasıl çalışırım"): "konuAdimlari". · Çözülecek/ürettiğin örnek soru: "cozumAdimlari" (+ "ipucu").',
   '- Plan: "pomodoroPlani" (oturum) / "haftalikPlan" (hafta). · Formül/özet: "formulKarti". · Moral: "momentum" + "molaRecetesi".',
+  '- Takvimi boşaltma/sıfırlama, "programları/planları kaldır", dinlenme/ara günü isteği: "takvimAksiyonu" (kapsam: "bugun"|"hafta"|"tumu").',
   '- Deneme sonucu: "denemeKiyasi" + "enBuyukKazanc". · Sınav günü: "oturumZamanPlani" + "sinavCantasi". · "Yetişir mi": "hedefOzeti" + "projeksiyon".',
   '',
   'ÖĞRETME & ALIŞTIRMA (en önemli iş):',
@@ -283,6 +317,15 @@ const KART_REHBERI = [
   '    · sure: günün TOPLAM süresi BİRİMLİ ("120 dk"/"2 saat", çıplak sayı yok). odak: ana ders/konu (kısa).',
   '    · isler: 2-3 KISA alt görev (takvime adım olur). cta.etiket "Takvime ekle".',
   '    · baslik ≤30 karakter, ozet tek kısa cümle. tarihAraligi KISA: "10–19 Haziran" gibi (ay/yıl tekrarı yok).',
+  '- takvimAksiyonu: { islem:"temizle", kapsam:"bugun"|"hafta"|"tumu", baslik, aciklama?, onayEtiket? }',
+  '    · Takvimdeki planları SİLME TEKLİFİdir; silmeyi öğrenci karttan onaylar, UYGULAMA yapar. Kaç plan',
+  '      olduğunu SEN bilmezsin → sayı UYDURMA, "kaldırdım/sildim" DEME.',
+  '    · KAPSAMI öğrencinin DEDİĞİ aralığa göre seç, KENDİLİĞİNDEN DARALTMA: "bugün/bugünü"→"bugun";',
+  '      "bu hafta/haftalık/bu haftaki/bu haftanın programı"→"hafta"; "hepsi/tümü/her şey/komple/takvimi',
+  '      sıfırla/baştan"→"tumu". Öğrenci "bu hafta" dediyse "bugun" SEÇME; tam istediği kapsamı ver.',
+  '    · baslik kısa ("Bu haftayı boşalt" / "Takvimi sıfırla"). aciklama tek sıcak cümle. onayEtiket buton metni',
+  '      ("Bu haftayı boşalt"). Deneme/sınav günleri silinmez. Bu kartı YALNIZCA öğrenci açıkça temizlemek/',
+  '      sıfırlamak/dinlenmek isteyince üret; tek başına yeterli (yanında ikinci kart şart değil).',
   '- formulKarti: { ders, konu, formuller:[{sol,sag,not?}], altinKural?, kaydedilebilir? }',
   '    · formuller: eşitliği "=" yerinden İKİYE BÖL — sol = eşitliğin SOL yanı, sag = SAĞ yanı/sonucu;',
   '      İKİSİ de KISA LaTeX (örn. sol "(x^n)\'", sag "n \\\\cdot x^{n-1}"). not = KISA Türkçe açıklama ("Güç kuralı").',
@@ -433,6 +476,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     yanit: yanit || 'Hazırladım 👇',
     kartlar,
     hafiza: temizleHafiza(cikti.hafiza),
+    hafizaNot: temizleHafizaNot(cikti.hafizaNot),
   });
 }
 
@@ -706,6 +750,22 @@ function temizleHafiza(h: unknown): { konu: string; ders?: string; sinyal: strin
   if (sinyal !== 'zorlaniyor' && sinyal !== 'anladi') return undefined;
   const ders = typeof (h as any).ders === 'string' ? (h as any).ders : undefined;
   return { konu: konu.trim().slice(0, 60), ders, sinyal };
+}
+
+const NOT_KATEGORILERI = new Set(['tercih', 'rutin', 'duygu']);
+
+/**
+ * Model'in opsiyonel kişisel notunu doğrular. Kategori tanımsız/yanlışsa not TAMAMEN düşer:
+ * kategoriye karar verememiş bir model muhtemelen "not almaya değer mi"ye de karar verememiştir.
+ */
+function temizleHafizaNot(h: unknown): { metin: string; kategori: string } | undefined {
+  if (!h || typeof h !== 'object') return undefined;
+  const metin = (h as any).metin;
+  // Model bazen "Rutin" gibi büyük harfle yazar; üç kategori adı da ASCII → lowercase güvenli.
+  const kategori = typeof (h as any).kategori === 'string' ? (h as any).kategori.trim().toLowerCase() : '';
+  if (typeof metin !== 'string' || !metin.trim()) return undefined;
+  if (!NOT_KATEGORILERI.has(kategori)) return undefined;
+  return { metin: metin.trim().slice(0, 120), kategori };
 }
 
 /** Güvenli JSON ayrıştırma; bozuksa boş nesne döner. */

@@ -23,6 +23,7 @@ import { Projeksiyon } from './kartlar/Projeksiyon';
 import { GunlukBrifing } from './kartlar/GunlukBrifing';
 import { BaglamSeridi } from './kartlar/BaglamSeridi';
 import { NiyetIzgarasi } from './kartlar/NiyetIzgarasi';
+import { TakvimAksiyonu } from './kartlar/TakvimAksiyonu';
 
 interface KartRendererProps {
   kart: Kart;
@@ -70,6 +71,8 @@ function icerikSec(kart: Kart, onAksiyon: KartRendererProps['onAksiyon'], onKart
       return <BaglamSeridi veri={kart.veri} onAksiyon={onAksiyon} onGuncelle={(v) => onKartGuncelle({ ...kart, veri: v })} />;
     case 'niyetIzgarasi':
       return <NiyetIzgarasi veri={kart.veri} onAksiyon={onAksiyon} onGuncelle={(v) => onKartGuncelle({ ...kart, veri: v })} />;
+    case 'takvimAksiyonu':
+      return <TakvimAksiyonu veri={kart.veri} onAksiyon={onAksiyon} onGuncelle={(v) => onKartGuncelle({ ...kart, veri: v })} />;
     default:
       return null;
   }
