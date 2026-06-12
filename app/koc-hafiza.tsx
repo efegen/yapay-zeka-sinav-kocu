@@ -99,6 +99,13 @@ export default function KocHafiza() {
     setSilHedef(null);
   }
 
+  // router.back() geçmiş yoksa (örn. web'de doğrudan açılınca) sessizce çalışmaz —
+  // bu durumda profile geri dön.
+  function geriDon() {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/profil' as any);
+  }
+
   async function hepsiniSil() {
     if (!uid) return;
     setIslemYukleniyor(true);
@@ -112,7 +119,7 @@ export default function KocHafiza() {
     <View style={s.ekran}>
       {/* Başlık */}
       <View style={[s.baslik, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity style={s.kapatBtn} onPress={() => router.back()} hitSlop={8}>
+        <TouchableOpacity style={s.kapatBtn} onPress={geriDon} hitSlop={8}>
           <Ionicons name="chevron-back" size={22} color={COLORS.textSecondary} />
         </TouchableOpacity>
         <Text style={s.baslikMetin}>Koç Hafızam</Text>

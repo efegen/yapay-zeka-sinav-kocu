@@ -491,7 +491,7 @@ function GunHucresi({
           noktalar.map((r, i) => (
             <View
               key={i}
-              style={[styles.gunNokta, { backgroundColor: bugunMu ? '#fff' : r, opacity: bugunMu ? 0.92 : 1 }]}
+              style={[styles.gunNokta, { backgroundColor: r }]}
             />
           ))}
         {deneme && !sinav && <Text style={styles.denemeEtiket}>DENEME</Text>}

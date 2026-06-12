@@ -477,7 +477,7 @@ function AyarlarSekme({
         <Row icon="lock-closed-outline" etiket="Şifremi Değiştir" chevron onPress={onSifre} />
         <Row
           icon="mail-outline"
-          etiket="E-posta Adresi"
+          etiket="E-posta"
           deger={profil?.email ?? '—'}
           chevron
         />
@@ -625,7 +625,7 @@ function Row({
       <View style={[s.rowIkon, { backgroundColor: danger ? ERROR_LIGHT : COLORS.primaryLight }]}>
         <Ionicons name={icon} size={16} color={danger ? COLORS.error : COLORS.primary} />
       </View>
-      <Text style={[s.rowEtiket, deger != null && s.rowEtiketAuto, danger && { color: COLORS.error }]}>{etiket}</Text>
+      <Text numberOfLines={1} style={[s.rowEtiket, deger != null && s.rowEtiketAuto, danger && { color: COLORS.error }]}>{etiket}</Text>
       {deger && <Text style={s.rowDeger}>{deger}</Text>}
       {chevron && <Ionicons name="chevron-forward" size={15} color={COLORS.textLight} />}
     </View>
@@ -806,7 +806,7 @@ const s = StyleSheet.create({
   rowIkon: { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
   rowEtiket: { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },
   // Değer içeren satırda etiket içerik genişliğinde kalır; değer esner ve sarar.
-  rowEtiketAuto: { flex: 0 },
+  rowEtiketAuto: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   rowDeger: {
     flex: 1,
     fontSize: 13, color: COLORS.textSecondary, fontWeight: '500',
