@@ -263,7 +263,6 @@ export const KART_TIPLERI: KartTipi[] = [
   'baglamSeridi',
   'niyetIzgarasi',
   'pomodoroPlani',
-  'konuAdimlari',
   'miniDenemeAnalizi',
   'cozumAdimlari',
   'ipucu',

@@ -74,7 +74,7 @@ function json(data: unknown, status = 200): Response {
 // Model { yanit, kartlar:[{tip,veri}] } üretir. UI tipli kartları çizer.
 // ════════════════════════════════════════════════════════════════════
 const GECERLI_TIPLER = new Set([
-  'gunlukBrifing', 'baglamSeridi', 'niyetIzgarasi', 'pomodoroPlani', 'konuAdimlari',
+  'gunlukBrifing', 'baglamSeridi', 'niyetIzgarasi', 'pomodoroPlani',
   'miniDenemeAnalizi', 'cozumAdimlari', 'ipucu', 'momentum', 'molaRecetesi',
   'denemeKiyasi', 'enBuyukKazanc', 'haftalikPlan', 'formulKarti',
   'oturumZamanPlani', 'sinavCantasi', 'hedefOzeti', 'projeksiyon', 'takvimAksiyonu',
@@ -86,8 +86,6 @@ function gecerliKart(tip: string, veri: Record<string, unknown>): boolean {
   switch (tip) {
     case 'cozumAdimlari':
       return dolu(veri.adimlar) && typeof veri.sonuc === 'string';
-    case 'konuAdimlari':
-      return typeof veri.konu === 'string' && dolu(veri.adimlar);
     case 'formulKarti':
       return typeof veri.konu === 'string' && dolu(veri.formuller);
     case 'haftalikPlan':
@@ -271,21 +269,20 @@ const KART_REHBERI = [
   '- hafizaNot\'a YAZMA: profilde zaten olan (isim/sınıf/hedef/netler), tek seferlik durum ("bugün yorgunum",',
   '  "dün uyuyamadım"), ders/konu performansı, hassas bilgi (sağlık teşhisi, kimlik/iletişim, aile özeli),',
   '  bağlamdaki "Koç notları"nda zaten yazılı olan. Böyle bir bilgi yoksa alanı HİÇ koyma.',
-  '- Konu sinyali (ÇOK TEMKİNLİ): öğrenci açıkça zorlandığını ("X\'i anlamıyorum") ya da artık anladığını',
-  '  söylerse ekle: "hafiza": { "konu": "Limit", "ders": "AYT Matematik", "sinyal": "zorlaniyor"|"anladi" }.',
-  '  Şüphedeysen KOYMA.',
+  '- Konu sinyali: öğrenci açıkça zorlandığını ("X\'i anlamıyorum", "X\'te/X konusunda iyi değilim",',
+  '  "X\'i bilmiyorum", "X\'e zayıfım", "X\'te kötüyüm") ya da artık anladığını söylerse ekle:',
+  '  "hafiza": { "konu": "Organik Kimya", "ders": "TYT Kimya", "sinyal": "zorlaniyor"|"anladi" }.',
+  '  Genel duygu/motivasyon cümleleri (yorgunum, canım istemiyor) sinyal değildir. Şüphedeysen KOYMA.',
   '',
   'KART SEÇİMİ (niyet → tip):',
-  '- Konu ÖĞRETME ("anlat"/"anlamıyorum"/"sıfırdan"): açıklama "yanit"a (+ "formulKarti"/"ipucu") — konuAdimlari DEĞİL.',
-  '- Konu ÇALIŞMA PLANI ("nasıl çalışırım"): "konuAdimlari". · Çözülecek/ürettiğin örnek soru: "cozumAdimlari" (+ "ipucu").',
+  '- Konu ÖĞRETME veya ÇALIŞMA PLANI ("anlat"/"anlamıyorum"/"nasıl çalışırım"/"iyi değilim"/"sıfırdan"): açıklama "yanit"a (+ "formulKarti"/"ipucu").',
+  '- Çözülecek/ürettiğin örnek soru: "cozumAdimlari" (+ "ipucu").',
   '- Plan: "pomodoroPlani" (oturum) / "haftalikPlan" (hafta). · Formül/özet: "formulKarti". · Moral: "momentum" + "molaRecetesi".',
   '- Takvimi boşaltma/sıfırlama, "programları/planları kaldır", dinlenme/ara günü isteği: "takvimAksiyonu" (kapsam: "bugun"|"hafta"|"tumu").',
   '- Deneme sonucu: "denemeKiyasi" + "enBuyukKazanc". · Sınav günü: "oturumZamanPlani" + "sinavCantasi". · "Yetişir mi": "hedefOzeti" + "projeksiyon".',
   '',
   'ÖĞRETME & ALIŞTIRMA (en önemli iş):',
-  '- Bir konuyu öğretirken "yanit"ta sıcak, sade, günlük örnekli, paragraf paragraf AÇIKLA — checklist\'e BÖLME',
-  '  (konuAdimlari öğretmez). "konuAdimlari" yalnızca yol haritası: adimlar = KISA eylemler (~6 kelime, "Kavramı',
-  '  videodan izle", "Temel 10 soru çöz") — tanım/açıklama/LaTeX KOYMA; en çok 1 aksiyon (alıştırma CTA\'sı).',
+  '- Bir konuyu öğretirken "yanit"ta sıcak, sade, günlük örnekli, paragraf paragraf AÇIKLA — madde listesine/checklistlere bölme.',
   '- "yanit" LaTeX RENDER ETMEZ: formülü "formulKarti"na (LaTeX) koy ya da sözel söyle ("x karenin türevi 2x");',
   '  "yanit" içine $...$ / \\frac yazma.',
   '- Örnek/alıştırma sorusu istenirse o konudan YENİ soru ÜRET, "cozumAdimlari" ile çöz: soru ekranda görünmez →',
@@ -302,7 +299,6 @@ const KART_REHBERI = [
   '',
   'KART ŞEMALARI (alan adlarını TAM kullan):',
   '- pomodoroPlani: { baslik, ozet, bloklar:[{sure,ders,tip:"odak"|"mola",renk?}], cta?:{etiket,aksiyon:"pomodoro"} }',
-  '- konuAdimlari: { konu, adimlar:[KISA eylem — tanım/LaTeX YOK], tamamlanan?:[index], aksiyonlar?:[{etiket,birincil?}] (en çok 1, alıştırma CTA\'sı) }',
   '- miniDenemeAnalizi: { baslik, dersler:[{ad,net,max,renk}], icgoru }',
   '- cozumAdimlari: { giris, adimlar:[{ad,detay}], sonuc, acikAdim? } (giris: öğrenci soruyu verdiyse tekrarlama; SEN ürettiysen soruyu giris\'e yaz)',
   '    · sonuc: net nihai cevap. Soru ŞIKLIYSA doğru şıkkın HARFİNİ MUTLAKA yaz (örn. "Cevap: C ($24$ birim)").',
