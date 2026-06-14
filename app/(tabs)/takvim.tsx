@@ -553,6 +553,7 @@ function PlanKarti({
   const bitenAdim = gorev.adimlar?.filter((a) => a.done).length ?? 0;
   const done = gorev.tamamlandi;
   const simdiVurgu = simdi && !done;
+  const saat = saatMetni(gorev.tarih); // başlangıç saati varsa göster
 
   return (
     <TouchableOpacity
@@ -582,8 +583,9 @@ function PlanKarti({
           {gorev.baslik}
         </Text>
         <View style={planStyles.metaSatir}>
-          <Ionicons name="timer-outline" size={12} color={COLORS.textLight} />
+          <Ionicons name={saat ? 'time-outline' : 'timer-outline'} size={12} color={COLORS.textLight} />
           <Text style={planStyles.meta}>
+            {saat ? `${saat} · ` : ''}
             {sureMetni(gorev.sure)}
             {done ? ' · tamamlandı' : adimSay > 0 ? ` · ${bitenAdim}/${adimSay} adım` : ''}
           </Text>

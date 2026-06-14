@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
   User,
@@ -70,6 +71,15 @@ export const girisYap = async (email: string, sifre: string) => {
     }
   }).catch(err => console.error('[authService] giriş sonrası retry check hatası:', err));
   return user;
+};
+
+/**
+ * Şifre sıfırlama e-postası gönderir (Firebase Auth). Kayıt yoksa Firebase
+ * `auth/user-not-found` döndürür; çağıran taraf gizlilik için bunu başarı gibi
+ * gösterebilir (hesap sayımı/enumeration engellenir).
+ */
+export const sifreSifirlamaGonder = async (email: string) => {
+  await sendPasswordResetEmail(auth, email.trim());
 };
 
 export const cikisYap = async () => {

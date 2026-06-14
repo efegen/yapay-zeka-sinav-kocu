@@ -382,15 +382,24 @@ export default function AnaSayfa() {
                 : 'Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada görünecek.'}
           </Text>
 
-          <TouchableOpacity
-            style={styles.denemeCta}
-            activeOpacity={0.85}
-            onPress={() => router.push('/(tabs)/denemeler' as any)}
-          >
-            <Ionicons name="clipboard-outline" size={15} color={COLORS.primary} />
-            <Text style={styles.denemeCtaMetin}>Denemelerim</Text>
-            <Ionicons name="chevron-forward" size={15} color={COLORS.primary} />
-          </TouchableOpacity>
+          <View style={styles.ctaSatir}>
+            <TouchableOpacity
+              style={styles.denemeCta}
+              activeOpacity={0.85}
+              onPress={() => router.push('/(tabs)/denemeler' as any)}
+            >
+              <Ionicons name="clipboard-outline" size={15} color={COLORS.primary} />
+              <Text style={styles.denemeCtaMetin}>Denemelerim</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.denemeCta}
+              activeOpacity={0.85}
+              onPress={() => router.push('/istatistik')}
+            >
+              <Ionicons name="bar-chart-outline" size={15} color={COLORS.primary} />
+              <Text style={styles.denemeCtaMetin}>İstatistiklerim</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Yukselen>
 
@@ -439,6 +448,24 @@ export default function AnaSayfa() {
             </TouchableOpacity>
           </View>
         </View>
+      </Yukselen>
+
+      {/* ─── Yanlış Defteri girişi ─── */}
+      <Yukselen gecikme={420}>
+        <TouchableOpacity
+          style={styles.aracKart}
+          activeOpacity={0.85}
+          onPress={() => router.push('/yanlis-defteri')}
+        >
+          <View style={styles.aracIkon}>
+            <Ionicons name="reader-outline" size={19} color={COLORS.accent} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.aracBaslik}>Yanlış Defteri</Text>
+            <Text style={styles.aracAlt} numberOfLines={1}>Yanlışlarını kaydet, tekrar et, koç hafızana işle</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.textLight} />
+        </TouchableOpacity>
       </Yukselen>
     </ScrollView>
   );
@@ -604,9 +631,23 @@ const styles = StyleSheet.create({
   siraAlt: { fontSize: 12, fontWeight: '600', color: COLORS.textLight },
   siraTrend: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 99 },
   siraTrendMetin: { fontSize: 11.5, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  // Yanlış Defteri giriş kartı
+  aracKart: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.cardBorder,
+    paddingVertical: 14, paddingHorizontal: 14,
+  },
+  aracIkon: {
+    width: 42, height: 42, borderRadius: 12, backgroundColor: COLORS.accent + '14',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  aracBaslik: { fontSize: 15, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
+  aracAlt: { fontSize: 12, fontWeight: '600', color: COLORS.textLight, marginTop: 2 },
+
+  ctaSatir: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   denemeCta: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-    marginTop: 12, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 11,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 9, paddingHorizontal: 14, borderRadius: 11,
     backgroundColor: COLORS.primaryLight,
   },
   denemeCtaMetin: { fontSize: 13.5, fontWeight: '700', color: COLORS.primary },

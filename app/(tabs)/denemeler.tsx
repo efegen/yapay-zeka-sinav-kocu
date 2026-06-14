@@ -84,6 +84,10 @@ export default function Denemeler() {
     router.push({ pathname: '/deneme-ekle', params: { id: d.id } });
   }
 
+  function analizEt(d: DenemeSonuc) {
+    router.push({ pathname: '/hata-analiz', params: { id: d.id } });
+  }
+
   // Her deneme için tahmini sıralama. Sıralama yalnız tam TYT+AYT denemelerinde
   // anlamlı (puan türü sıralaması iki föyü de gerektirir). Puan türü denemenin
   // kendi alanından, OBP ise profildeki diploma notundan gelir.
@@ -116,17 +120,26 @@ export default function Denemeler() {
             </Text>
           )}
         </View>
-        <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/deneme-ekle')}>
-          <LinearGradient
-            colors={[COLORS.primary, COLORS.accent]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.yeniBtn}
+        <View style={styles.baslikSagBtnler}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.istatistikBtn}
+            onPress={() => router.push('/istatistik')}
           >
-            <Ionicons name="add" size={18} color="#fff" />
-            <Text style={styles.yeniMetin}>Yeni</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            <Ionicons name="bar-chart-outline" size={18} color={COLORS.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/deneme-ekle')}>
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.accent]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.yeniBtn}
+            >
+              <Ionicons name="add" size={18} color="#fff" />
+              <Text style={styles.yeniMetin}>Yeni</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {yukleniyor ? (
@@ -212,6 +225,17 @@ export default function Denemeler() {
                 </View>
 
                 <View style={styles.kontrol}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={[styles.icoBtn, styles.icoBtnAnaliz]}
+                    onPress={() => analizEt(d)}
+                  >
+                    <Ionicons
+                      name={d.hataAnalizi ? 'analytics' : 'analytics-outline'}
+                      size={18}
+                      color={COLORS.accent}
+                    />
+                  </TouchableOpacity>
                   <TouchableOpacity activeOpacity={0.7} style={styles.icoBtn} onPress={() => duzenle(d)}>
                     <Ionicons name="create-outline" size={18} color={COLORS.textSecondary} />
                   </TouchableOpacity>
@@ -243,6 +267,12 @@ const styles = StyleSheet.create({
   baslikMetin: { fontSize: 25, fontWeight: '800', color: COLORS.text, letterSpacing: -0.6 },
   baslikAlt: { fontSize: 11.5, fontWeight: '700', color: COLORS.textLight, marginTop: 3 },
   baslikAltVurgu: { color: COLORS.primary, fontWeight: '800' },
+  baslikSagBtnler: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  istatistikBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: COLORS.primaryLight, borderWidth: 1, borderColor: COLORS.primary + '33',
+    justifyContent: 'center', alignItems: 'center',
+  },
   yeniBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingVertical: 9, paddingLeft: 12, paddingRight: 14, borderRadius: 12,
@@ -291,6 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBFBFE', justifyContent: 'center', alignItems: 'center',
   },
   icoBtnSil: { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' },
+  icoBtnAnaliz: { borderColor: COLORS.accent + '55', backgroundColor: COLORS.accent + '10' },
 
   // ── Silme onayı (kart içi) ──
   kartOnay: {

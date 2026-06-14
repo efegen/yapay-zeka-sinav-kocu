@@ -18,6 +18,7 @@ import {
   HedefNetBilgisi,
 } from './yokatlasService';
 import type { DenemeSonuc } from '../models/deneme';
+import type { NedenKategori } from '../utils/hataAnalizi';
 
 export type NetFetchStatus = 'pending' | 'done' | 'not_needed' | 'failed';
 
@@ -105,6 +106,19 @@ export const syncHedefNetBilgisi = async (
     }
   } catch (err) {
     console.error('[firestoreService] syncHedefNetBilgisi hatası:', err);
+  }
+};
+
+/**
+ * Öğrencinin son giriş/açılış zamanını günceller. Proaktif bildirim ve davranışsal
+ * analiz (rapor PB-TC-01: "son giriş tarihi kontrolü") bu alana dayanır. Best-effort:
+ * hata olsa da akışı bozmaz.
+ */
+export const sonGirisGuncelle = async (uid: string): Promise<void> => {
+  try {
+    await updateDoc(doc(db, 'users', uid), { sonGirisTarihi: Timestamp.now() });
+  } catch (err) {
+    console.error('[firestoreService] sonGirisGuncelle hatası:', err);
   }
 };
 
@@ -435,4 +449,53 @@ export const denemeGuncelle = async (
 export const denemeSil = async (uid: string, denemeId: string): Promise<void> => {
   const ref = doc(db, 'users', uid, 'denemeler', denemeId);
   await deleteDoc(ref);
+};
+
+// ─────────────────────────────────────────────
+// Yanlış defteri (mistake notebook)
+// ─────────────────────────────────────────────
+// Öğrencinin yanlış yaptığı konu/soruları biriktirir; tekrar edip "öğrendim" deyince
+// arşivlenir. Konu, koç hafızasına (zorlandığın konular) da işlenir — bağlantı ekranda kurulur.
+export interface Yanlis {
+  id: string;
+  ders: string; // "AYT Matematik"
+  konu: string; // "Türev"
+  not?: string; // serbest açıklama / sorunun özeti
+  kategori?: NedenKategori; // dikkatsizlik | sure | bilgi (opsiyonel)
+  ogrenildi: boolean; // tekrar edilip öğrenildi mi
+  olusturmaTarihi: Timestamp;
+}
+
+export const yanlisEkle = async (
+  uid: string,
+  yanlis: Omit<Yanlis, 'id' | 'olusturmaTarihi'>
+): Promise<string> => {
+  const kolRef = collection(db, 'users', uid, 'yanlislar');
+  const ref = await addDoc(kolRef, {
+    ...temizle(yanlis as unknown as Record<string, unknown>),
+    olusturmaTarihi: Timestamp.now(),
+  });
+  return ref.id;
+};
+
+// En yeni önce (tek-alan, index gerektirmez).
+export const yanlislariGetir = async (uid: string): Promise<Yanlis[]> => {
+  const kolRef = collection(db, 'users', uid, 'yanlislar');
+  const snap = await getDocs(kolRef);
+  return snap.docs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((d) => ({ id: d.id, ...(d.data() as any) }) as Yanlis)
+    .sort((a, b) => (b.olusturmaTarihi?.toMillis() ?? 0) - (a.olusturmaTarihi?.toMillis() ?? 0));
+};
+
+export const yanlisGuncelle = async (
+  uid: string,
+  id: string,
+  patch: Partial<Omit<Yanlis, 'id' | 'olusturmaTarihi'>>
+): Promise<void> => {
+  await updateDoc(doc(db, 'users', uid, 'yanlislar', id), temizle(patch as Record<string, unknown>));
+};
+
+export const yanlisSil = async (uid: string, id: string): Promise<void> => {
+  await deleteDoc(doc(db, 'users', uid, 'yanlislar', id));
 };

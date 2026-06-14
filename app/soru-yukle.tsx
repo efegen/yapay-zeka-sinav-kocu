@@ -19,6 +19,8 @@ import { useProfile } from '../hooks/useProfile';
 import { baglamKur, soruyuCoz, AiHatasi, type SoruYaniti } from '../services/aiService';
 import type { Kart } from '../types/koc';
 import { KartRenderer } from '../components/koc/KartRenderer';
+import { auth } from '../services/firebaseConfig';
+import { konuSinyali } from '../services/kocHafizaService';
 
 type Adim = 'bos' | 'yukleniyor' | 'basarili' | 'bulanik' | 'alakasiz';
 
@@ -29,6 +31,8 @@ export default function SoruYukle() {
   const [gorselUri, setGorselUri] = useState<string | null>(null);
   const [sonuc, setSonuc] = useState<SoruYaniti | null>(null);
   const [snackbarMesaj, setSnackbarMesaj] = useState('');
+  // Çözülen sorunun konusu için öğrenci geri bildirimi (eksik konu haritası).
+  const [konuSinyalDurum, setKonuSinyalDurum] = useState<'bekliyor' | 'zorlaniyor' | 'anladi'>('bekliyor');
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const ilerlemeAnim = useRef(new Animated.Value(0)).current;
@@ -103,6 +107,7 @@ export default function SoruYukle() {
     const asset = secim.assets[0];
     setGorselUri(asset.uri);
     setSonuc(null);
+    setKonuSinyalDurum('bekliyor');
     setAdim('yukleniyor');
 
     if (!asset.base64) {
@@ -127,10 +132,24 @@ export default function SoruYukle() {
     setSonuc((s) => (s ? { ...s, kartlar: s.kartlar.map((k, j) => (j === i ? yeni : k)) } : s));
   }
 
+  // Çözülen sorunun konusunu koç hafızasına işler: "zorlaniyor" → eksik konu haritası.
+  async function konuGeriBildirim(sinyal: 'zorlaniyor' | 'anladi') {
+    const uid = auth.currentUser?.uid;
+    const konu = sonuc?.konu?.trim();
+    if (!uid || !konu) return;
+    setKonuSinyalDurum(sinyal); // iyimser: butonlar hemen onaya döner
+    try {
+      await konuSinyali(uid, { ad: konu, ders: sonuc?.ders?.trim() || undefined, sinyal });
+    } catch (e) {
+      console.error('[SoruYukle] konuSinyali hatası:', e);
+    }
+  }
+
   function sifirla() {
     setAdim('bos');
     setGorselUri(null);
     setSonuc(null);
+    setKonuSinyalDurum('bekliyor');
     sonucAnim.setValue(0);
   }
 
@@ -209,6 +228,51 @@ export default function SoruYukle() {
                 onAksiyon={() => {}}
               />
             ))}
+
+            {/* Konu geri bildirimi → eksik konu haritası (koç hafızası) */}
+            {!!sonuc.konu && (
+              <View style={styles.konuGeri}>
+                {konuSinyalDurum === 'bekliyor' ? (
+                  <>
+                    <Text style={styles.konuGeriBaslik}>Bu konuda kendini nasıl hissediyorsun?</Text>
+                    <Text style={styles.konuGeriKonu}>
+                      {[sonuc.ders, sonuc.konu].filter(Boolean).join(' · ')}
+                    </Text>
+                    <View style={styles.konuGeriBtnRow}>
+                      <TouchableOpacity
+                        style={[styles.konuGeriBtn, styles.konuGeriZor]}
+                        onPress={() => konuGeriBildirim('zorlaniyor')}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="alert-circle-outline" size={16} color={COLORS.accent} />
+                        <Text style={[styles.konuGeriBtnMetin, { color: COLORS.accent }]}>Hâlâ zorlanıyorum</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.konuGeriBtn, styles.konuGeriIyi]}
+                        onPress={() => konuGeriBildirim('anladi')}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="checkmark-circle-outline" size={16} color={COLORS.success} />
+                        <Text style={[styles.konuGeriBtnMetin, { color: COLORS.success }]}>Anladım</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.konuGeriOnay}>
+                    <Ionicons
+                      name={konuSinyalDurum === 'zorlaniyor' ? 'bookmark' : 'checkmark-circle'}
+                      size={16}
+                      color={konuSinyalDurum === 'zorlaniyor' ? COLORS.accent : COLORS.success}
+                    />
+                    <Text style={styles.konuGeriOnayMetin}>
+                      {konuSinyalDurum === 'zorlaniyor'
+                        ? `Koç hafızana eklendi — "${sonuc.konu}" zorlandığın konular arasına alındı, planın bunu önceliklendirecek.`
+                        : `Harika! "${sonuc.konu}" anladığın konular arasına işaretlendi.`}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
 
             <TouchableOpacity style={styles.tekrarBtn} onPress={sifirla} activeOpacity={0.8}>
               <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
@@ -362,6 +426,24 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.primary,
   },
   tekrarMetin: { fontSize: 14, fontWeight: '600', color: COLORS.primary },
+
+  // Konu geri bildirimi (eksik konu haritası)
+  konuGeri: {
+    backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder,
+    padding: 14, gap: 10,
+  },
+  konuGeriBaslik: { fontSize: 13.5, fontWeight: '800', color: COLORS.text },
+  konuGeriKonu: { fontSize: 12.5, fontWeight: '700', color: COLORS.primary, marginTop: -4 },
+  konuGeriBtnRow: { flexDirection: 'row', gap: 10 },
+  konuGeriBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 11, borderRadius: 11, borderWidth: 1.5,
+  },
+  konuGeriZor: { backgroundColor: COLORS.accent + '10', borderColor: COLORS.accent + '55' },
+  konuGeriIyi: { backgroundColor: COLORS.success + '12', borderColor: COLORS.success + '55' },
+  konuGeriBtnMetin: { fontSize: 12.5, fontWeight: '800' },
+  konuGeriOnay: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  konuGeriOnayMetin: { flex: 1, fontSize: 12.5, fontWeight: '600', color: COLORS.textSecondary, lineHeight: 18 },
 
   hataSonrasiAlani: { gap: 12 },
   hataBadge: {

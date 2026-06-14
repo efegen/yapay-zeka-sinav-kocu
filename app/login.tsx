@@ -7,13 +7,38 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
-import { girisYap } from '../services/authService';
+import { girisYap, sifreSifirlamaGonder } from '../services/authService';
 import { bildir } from '../utils/bildirim';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [sifre, setSifre] = useState('');
   const [yukleniyor, setYukleniyor] = useState(false);
+  const [sifirlaYukleniyor, setSifirlaYukleniyor] = useState(false);
+
+  const handleSifremiUnuttum = async () => {
+    const e = email.trim();
+    if (!e) {
+      bildir('E-posta gerekli', 'Şifre sıfırlama bağlantısı için önce e-posta adresini gir.');
+      return;
+    }
+    setSifirlaYukleniyor(true);
+    try {
+      await sifreSifirlamaGonder(e);
+      bildir('Bağlantı gönderildi', 'E-postana şifre sıfırlama bağlantısı gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et.');
+    } catch (err: any) {
+      // user-not-found'da da gizlilik için "gönderildi" göster (hesap enumeration'ı engelle).
+      if (err?.code === 'auth/invalid-email') {
+        bildir('Geçersiz e-posta', 'Lütfen geçerli bir e-posta adresi gir.');
+      } else if (err?.code === 'auth/user-not-found') {
+        bildir('Bağlantı gönderildi', 'E-postana şifre sıfırlama bağlantısı gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et.');
+      } else {
+        bildir('Gönderilemedi', 'Şu an bağlantı gönderilemedi. İnternetini kontrol edip tekrar dene.');
+      }
+    } finally {
+      setSifirlaYukleniyor(false);
+    }
+  };
 
   const handleGiris = async () => {
     if (!email || !sifre) {
@@ -74,6 +99,16 @@ export default function LoginScreen() {
             secureTextEntry
           />
 
+          <TouchableOpacity
+            style={styles.sifremiUnuttum}
+            onPress={handleSifremiUnuttum}
+            disabled={sifirlaYukleniyor}
+          >
+            <Text style={styles.sifremiUnuttumText}>
+              {sifirlaYukleniyor ? 'Gönderiliyor…' : 'Şifremi unuttum?'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity onPress={handleGiris} disabled={yukleniyor}>
             <LinearGradient
               colors={[COLORS.primary, COLORS.accent]}
@@ -124,9 +159,11 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.cardBorder,
     marginTop: 4,
   },
+  sifremiUnuttum: { alignSelf: 'flex-end', marginTop: 10, paddingVertical: 4 },
+  sifremiUnuttumText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
   button: {
     borderRadius: 16, padding: 18,
-    alignItems: 'center', marginTop: 24,
+    alignItems: 'center', marginTop: 16,
   },
   buttonText: { color: COLORS.white, fontSize: 17, fontWeight: '700' },
   kayitLink: { alignItems: 'center', marginTop: 16 },

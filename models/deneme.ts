@@ -4,6 +4,7 @@
 
 import { Timestamp } from 'firebase/firestore';
 import { COLORS } from '../constants/colors';
+import type { HataAnaliziKaydi } from '../utils/hataAnalizi';
 
 export type Kapsam = 'tyt' | 'ayt' | 'ikisi';
 export type Alan = 'SAY' | 'EA' | 'SOZ' | 'DIL';
@@ -117,6 +118,7 @@ export interface DenemeSonuc {
   toplamNet: number;
   tarih: Timestamp; // denemenin tarihi
   olusturmaTarihi: Timestamp;
+  hataAnalizi?: HataAnaliziKaydi; // Akıllı Hata Analizi sonucu (varsa)
 }
 
 // ── Hesaplama yardımcıları ──

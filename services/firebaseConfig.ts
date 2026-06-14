@@ -7,7 +7,12 @@ import { getAuth, initializeAuth, type Auth } from 'firebase/auth';
 // görmediği için ayrı ve bastırılmış import kullanıyoruz; çalışma zamanında mevcut.
 // @ts-ignore
 import { getReactNativePersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -30,4 +35,20 @@ export const auth: Auth =
         persistence: getReactNativePersistence(AsyncStorage),
       });
 
-export const db = getFirestore(app);
+// Web'de kalıcı (IndexedDB) önbellek: çevrimdışıyken — sayfa yenilense bile — son veriler
+// (plan, denemeler, profil) görünmeye devam eder. Native'de JS SDK'nın oturum-içi cache'i
+// zaten yeterli (IndexedDB yok). Kurulum başarısız olursa varsayılan örneğe düşülür.
+function olusturDb() {
+  if (Platform.OS === 'web') {
+    try {
+      return initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      });
+    } catch (e) {
+      console.warn('[firebase] kalıcı önbellek açılamadı, varsayılana dönülüyor:', e);
+    }
+  }
+  return getFirestore(app);
+}
+
+export const db = olusturDb();

@@ -16,15 +16,39 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Timestamp } from 'firebase/firestore';
 import { auth } from '../services/firebaseConfig';
-import { Adim, AdimTip, gorevEkle } from '../services/firestoreService';
+import { Adim, AdimTip, Gorev, gorevEkle, gunGorevleriniGetir } from '../services/firestoreService';
 import { COLORS } from '../constants/colors';
 import { dersRenk } from '../constants/dersler';
 import { bildir } from '../utils/bildirim';
 
 const AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 const GUN_KISA = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+
+// ÇT-TC-02: Pomodoro tekniği gereği planlanan toplam süre en az 25 dakika olmalı.
+const POMODORO_MIN = 25;
+const ikiHane = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+
+/**
+ * ÇT-TC-03 (cakismaVarMi): Aynı GÜNDE, başlangıç saati TANIMLI bir planla zaman örtüşmesi
+ * var mı? Saatsiz (gece yarısı = "tüm gün") planlar ve denemeler çakışmaya dahil edilmez.
+ */
+async function cakismaBul(uid: string, baslangic: Date, sureDk: number): Promise<Gorev | null> {
+  const { planned } = await gunGorevleriniGetir(uid, baslangic);
+  const yeniBas = baslangic.getHours() * 60 + baslangic.getMinutes();
+  const yeniBit = yeniBas + sureDk;
+  for (const g of planned) {
+    if (g.tur === 'deneme' || !g.tarih) continue;
+    const d = g.tarih.toDate();
+    if (d.getHours() === 0 && d.getMinutes() === 0) continue; // saatsiz (tüm gün) plan
+    const bas = d.getHours() * 60 + d.getMinutes();
+    const bit = bas + (g.sure || 0);
+    if (yeniBas < bit && bas < yeniBit) return g; // [yeniBas,yeniBit) ile [bas,bit) örtüşüyor
+  }
+  return null;
+}
 
 // Ders, alana göre iki ayrı grupta sunulur. AYT seti Sayısal alana göredir.
 const TYT_DERSLER = ['Türkçe', 'Matematik', 'Fen', 'Sosyal'];
@@ -74,9 +98,23 @@ export default function PlanKur() {
   const [secili, setSecili] = useState<{ grup: string; ders: string } | null>(null);
   const [adimlar, setAdimlar] = useState<Adim[]>([]);
   const [ayarIndex, setAyarIndex] = useState<number | null>(null);
+  const [saat, setSaat] = useState(''); // '' = tüm gün · 'HH:MM' = başlangıç saati
+  const [saatPickerAcik, setSaatPickerAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
 
   const renk = dersRenk(secili?.ders);
+
+  // Native saat seçicinin başlangıç değeri.
+  const saatDate = useMemo(() => {
+    const d = new Date(hedefTarih);
+    if (saat) {
+      const [h, m] = saat.split(':').map(Number);
+      d.setHours(h || 0, m || 0, 0, 0);
+    } else {
+      d.setHours(9, 0, 0, 0);
+    }
+    return d;
+  }, [saat, hedefTarih]);
   const toplamDk = adimlar.reduce((t, a) => t + (a.dk || 0), 0);
   const soruToplam = adimlar.reduce((t, a) => t + (a.soru || 0), 0);
 
@@ -101,18 +139,44 @@ export default function PlanKur() {
       bildir('Eksik bilgi', 'Önce ne çalışacağını yaz.');
       return;
     }
+
+    const temiz: Adim[] = adimlar.map((a) => ({
+      tip: a.tip,
+      ad: a.ad.trim() || ADIM_META[a.tip].ad,
+      dk: Math.max(1, a.dk || 0),
+      done: false,
+      ...(a.tip === 'soru' ? { soru: Math.max(0, a.soru || 0) } : {}),
+    }));
+    const sure = temiz.reduce((t, a) => t + a.dk, 0);
+
+    // ÇT-TC-02: Pomodoro min süre kuralı.
+    if (sure < POMODORO_MIN) {
+      bildir(
+        'Süre yetersiz',
+        `Sistem Pomodoro tekniği ile çalıştığı için planlanan süre en az ${POMODORO_MIN} dakika olmalıdır.`
+      );
+      return;
+    }
+
+    // Başlangıç günü (+ opsiyonel saat). Saat verilmezse gece yarısı = "tüm gün".
+    const gun = new Date(hedefTarih);
+    gun.setHours(0, 0, 0, 0);
+    if (saat) {
+      const [h, m] = saat.split(':').map(Number);
+      gun.setHours(h || 0, m || 0, 0, 0);
+    }
+
     setKaydediliyor(true);
     try {
-      const temiz: Adim[] = adimlar.map((a) => ({
-        tip: a.tip,
-        ad: a.ad.trim() || ADIM_META[a.tip].ad,
-        dk: Math.max(1, a.dk || 0),
-        done: false,
-        ...(a.tip === 'soru' ? { soru: Math.max(0, a.soru || 0) } : {}),
-      }));
-      const sure = temiz.reduce((t, a) => t + a.dk, 0);
-      const gun = new Date(hedefTarih);
-      gun.setHours(0, 0, 0, 0);
+      // ÇT-TC-03: saat verildiyse aynı saatteki planlarla çakışma kontrolü.
+      if (saat) {
+        const cakisan = await cakismaBul(uid, gun, sure);
+        if (cakisan) {
+          bildir('Saat çakışması', `Bu saatte başka bir plan var: "${cakisan.baslik}". Lütfen farklı bir saat seç.`);
+          setKaydediliyor(false);
+          return;
+        }
+      }
       await gorevEkle(uid, {
         baslik: baslik.trim(),
         ders: secili?.ders ?? 'Genel',
@@ -188,6 +252,48 @@ export default function PlanKur() {
               secili={secili}
               onSec={(d) => setSecili({ grup: 'AYT', ders: d })}
             />
+          </View>
+
+          {/* ─── Başlangıç saati (opsiyonel) ─── */}
+          <View>
+            <Text style={[styles.etiket, { marginBottom: 8 }]}>Başlangıç saati (opsiyonel)</Text>
+            {Platform.OS === 'web' ? (
+              <View style={styles.saatKutu}>
+                <Ionicons name="time-outline" size={17} color={COLORS.primary} />
+                <input
+                  type="time"
+                  value={saat}
+                  onChange={(e: any) => setSaat(e.target.value)}
+                  style={{
+                    flex: 1, border: 'none', outline: 'none', background: 'transparent',
+                    padding: 0, fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+                    color: COLORS.text, colorScheme: 'light',
+                  }}
+                />
+                {!!saat && (
+                  <TouchableOpacity onPress={() => setSaat('')} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.saatKutu} activeOpacity={0.85} onPress={() => setSaatPickerAcik(true)}>
+                <Ionicons name="time-outline" size={17} color={COLORS.primary} />
+                <Text style={[styles.saatMetin, !saat && { color: COLORS.textLight }]}>
+                  {saat || 'Tüm gün (saat seçilmedi)'}
+                </Text>
+                {saat ? (
+                  <TouchableOpacity onPress={() => setSaat('')} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={COLORS.textLight} />
+                )}
+              </TouchableOpacity>
+            )}
+            <Text style={styles.saatYardim}>
+              Saat seçersen o gün aynı saate denk gelen planlarla çakışma kontrol edilir.
+            </Text>
           </View>
 
           {/* ─── Çalışma adımları ─── */}
@@ -268,6 +374,50 @@ export default function PlanKur() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Başlangıç saati seçici (native) */}
+      {saatPickerAcik && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={saatDate}
+          mode="time"
+          is24Hour
+          display="default"
+          onChange={(e, sel) => {
+            setSaatPickerAcik(false);
+            if (e.type === 'set' && sel) setSaat(`${ikiHane(sel.getHours())}:${ikiHane(sel.getMinutes())}`);
+          }}
+        />
+      )}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={saatPickerAcik}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setSaatPickerAcik(false)}
+        >
+          <Pressable style={styles.overlay} onPress={() => setSaatPickerAcik(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetTutamac} />
+            <View style={styles.saatSheetBaslikSatir}>
+              <Text style={styles.sheetBaslik}>Başlangıç saati</Text>
+              <TouchableOpacity onPress={() => setSaatPickerAcik(false)} hitSlop={10}>
+                <Text style={styles.saatTamam}>Tamam</Text>
+              </TouchableOpacity>
+            </View>
+            <DateTimePicker
+              value={saatDate}
+              mode="time"
+              display="spinner"
+              locale="tr-TR"
+              themeVariant="light"
+              onChange={(_, sel) => {
+                if (sel) setSaat(`${ikiHane(sel.getHours())}:${ikiHane(sel.getMinutes())}`);
+              }}
+            />
+          </View>
+        </Modal>
+      )}
 
       <AyarModal
         acik={ayarIndex !== null}
@@ -533,6 +683,17 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     padding: 0,
   },
+
+  // Başlangıç saati
+  saatKutu: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 13, paddingHorizontal: 14, borderRadius: 14,
+    backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.cardBorder,
+  },
+  saatMetin: { flex: 1, fontSize: 15, fontWeight: '700', color: COLORS.text },
+  saatYardim: { fontSize: 11, fontWeight: '600', color: COLORS.textLight, marginTop: 6 },
+  saatSheetBaslikSatir: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  saatTamam: { fontSize: 15, fontWeight: '800', color: COLORS.primary },
 
   // Ders grupları
   dersGrubu: { flexDirection: 'row', alignItems: 'center', gap: 10 },
