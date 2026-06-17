@@ -17,7 +17,7 @@ import {
   YokatlasProgram,
 } from '../services/yokatlasService';
 
-const TOPLAM_ADIM = 5;
+const TOPLAM_ADIM = 4;
 
 const SINIFLAR = [
   { deger: '11', baslik: '11. Sınıf', alt: '2027 YKS' },
@@ -46,20 +46,6 @@ const SIRALAMA_MAKS: Record<string, number> = {
   SOZ: 400_000,
   DIL: 100_000,
 };
-
-const HAFTA_CALISMA = [
-  { deger: 7, baslik: 'Her gün', alt: 'Maksimum tempo' },
-  { deger: 6, baslik: '6 gün', alt: 'Yüksek tempo' },
-  { deger: 5, baslik: '5 gün', alt: 'Dengeli tempo' },
-  { deger: 4, baslik: '4 gün', alt: 'Orta tempo' },
-  { deger: 3, baslik: '3 gün', alt: 'Rahat tempo' },
-];
-
-const GUNLUK_SORU_SECENEKLERI = [
-  { deger: 50, baslik: '50', alt: 'soru / gün' },
-  { deger: 75, baslik: '75', alt: 'soru / gün' },
-  { deger: 100, baslik: '100', alt: 'soru / gün' },
-];
 
 const KVKK_METNI = `Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) kapsamında, Yapay Zekâ Destekli Sınav Koçu (YZDSK) uygulamasını kullanırken kişisel verilerinin nasıl işlendiğini açıklar.
 
@@ -157,11 +143,6 @@ export default function OnboardingScreen() {
   const [uniArama, setUniArama] = useState('');
   const [bolumArama, setBolumArama] = useState('');
 
-  // Adım 5
-  const [haftaCalisma, setHaftaCalisma] = useState(0);
-  const [gunlukSoru, setGunlukSoru] = useState(0);
-  const [ozelSoru, setOzelSoru] = useState('');
-
   const ileriValidasyon = (): boolean => {
     if (adim === 1) {
       const hatalar: Record<string, string> = {};
@@ -233,10 +214,6 @@ export default function OnboardingScreen() {
   const geri = () => setAdim(adim - 1);
 
   const tamamla = async () => {
-    const soruSayisi = ozelSoru ? parseInt(ozelSoru) : gunlukSoru;
-    if (!haftaCalisma || !soruSayisi) {
-      bildir('Eksik bilgi', 'Çalışma planını tamamlayın.'); return;
-    }
     setYukleniyor(true);
     try {
       await kayitOl(email.trim(), sifre, {
@@ -251,8 +228,6 @@ export default function OnboardingScreen() {
         hedefBolum: hedefTuru === 'universite' ? (secilenProgram?.bolumAdi || '') : '',
         hedefProgramId: hedefTuru === 'universite' ? (secilenProgram?.programId || '') : '',
         ...(hedefTuru === 'siralama' && { hedefSiralama: parseInt(hedefSiralama) }),
-        haftaCalismaSayisi: haftaCalisma,
-        gunlukSoruHedefi: soruSayisi,
         kvkkOnay: true,
       });
       router.replace('/(tabs)');
@@ -268,7 +243,6 @@ export default function OnboardingScreen() {
     2: { baslik: 'Okul Bilgilerin', emoji: '🏫' },
     3: { baslik: 'Puan Türün', emoji: '📊' },
     4: { baslik: 'Hedefin', emoji: '🏆' },
-    5: { baslik: 'Çalışma Planın', emoji: '📅' },
   };
 
   return (
@@ -663,57 +637,6 @@ export default function OnboardingScreen() {
           </View>
         )}
 
-        {/* ===== ADIM 5: Çalışma Planı ===== */}
-        {adim === 5 && (
-          <View>
-            <Text style={styles.bolumBaslik}>
-              Haftada kaç gün çalışacaksın?
-            </Text>
-            {HAFTA_CALISMA.map((h) => (
-              <SelectCard key={h.deger} baslik={h.baslik} alt={h.alt}
-                secili={haftaCalisma === h.deger}
-                onPress={() => setHaftaCalisma(h.deger)} />
-            ))}
-
-            <Text style={[styles.bolumBaslik, { marginTop: 28 }]}>
-              Günlük soru hedefin
-            </Text>
-            <Text style={styles.altBaslik}>
-              Her gün kaç soru çözmek istersin?
-            </Text>
-            {GUNLUK_SORU_SECENEKLERI.map((g) => (
-              <SelectCard key={g.deger} baslik={g.baslik} alt={g.alt}
-                secili={gunlukSoru === g.deger && ozelSoru === ''}
-                onPress={() => { setGunlukSoru(g.deger); setOzelSoru(''); }} />
-            ))}
-
-            <Text style={[styles.label, { marginTop: 16 }]}>
-              Veya özel hedef gir
-            </Text>
-            <View style={styles.ozelSoruSatir}>
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="20 – 1000"
-                placeholderTextColor={COLORS.textLight}
-                value={ozelSoru}
-                onChangeText={(t) => {
-                  setOzelSoru(t);
-                  setGunlukSoru(0);
-                }}
-                keyboardType="number-pad"
-              />
-              {ozelSoru !== '' && (
-                <LinearGradient
-                  colors={[COLORS.primary, COLORS.accent]}
-                  style={styles.ozelOnay}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                >
-                  <Text style={styles.ozelOnayYazi}>✓</Text>
-                </LinearGradient>
-              )}
-            </View>
-          </View>
-        )}
       </ScrollView>
 
       {/* Alt Butonlar */}
@@ -1136,12 +1059,6 @@ const styles = StyleSheet.create({
     padding: 14, marginTop: 12,
   },
   infoYazi: { fontSize: 13, color: COLORS.primary, lineHeight: 20 },
-  ozelSoruSatir: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  ozelOnay: {
-    width: 52, height: 52, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  ozelOnayYazi: { color: COLORS.white, fontSize: 20, fontWeight: '800' },
   altAlan: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', gap: 12,

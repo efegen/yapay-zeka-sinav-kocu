@@ -22,8 +22,6 @@ export interface KayitData {
   hedefBolum: string;
   hedefProgramId: string;
   hedefSiralama?: number;
-  haftaCalismaSayisi: number;
-  gunlukSoruHedefi: number;
   kvkkOnay: boolean;
 }
 

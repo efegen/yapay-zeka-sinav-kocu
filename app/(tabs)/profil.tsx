@@ -39,7 +39,7 @@ import { hedefYksYili } from '../../constants/sinav';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { bildir } from '../../utils/bildirim';
 
-type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis' | 'hedefler' | 'eposta' | 'sinif';
+type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis' | 'eposta' | 'sinif';
 
 const SINIF_SECENEKLERI = [
   { deger: '11', baslik: '11. Sınıf' },
@@ -96,8 +96,6 @@ export default function Profil() {
   const [yeniEposta, setYeniEposta] = useState('');
   const [epostaSifre, setEpostaSifre] = useState('');
   const [epostaHata, setEpostaHata] = useState('');
-  const [hedefSoru, setHedefSoru] = useState(0);
-  const [hedefGun, setHedefGun] = useState(1);
   const [sinifSecim, setSinifSecim] = useState('');
 
   const [trackWidth, setTrackWidth] = useState(0);
@@ -135,12 +133,6 @@ export default function Profil() {
     setYeniEposta(''); setEpostaSifre(''); setEpostaHata('');
   }
 
-  function hedeflerAc() {
-    setHedefSoru(profil?.gunlukSoruHedefi ?? 0);
-    setHedefGun(profil?.haftaCalismaSayisi ?? 1);
-    setAktifModal('hedefler');
-  }
-
   function sinifAc() {
     setSinifSecim(profil?.sinif ?? '');
     setAktifModal('sinif');
@@ -157,22 +149,6 @@ export default function Profil() {
     } catch (e) {
       console.error('[Profil] sinif kaydetme hatasi:', e);
       bildir('Hata', 'Sınıf kaydedilemedi, tekrar dene.');
-    } finally {
-      setIslemYukleniyor(false);
-    }
-  }
-
-  async function hedefleriKaydet() {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    setIslemYukleniyor(true);
-    try {
-      await profilGuncelle(uid, { gunlukSoruHedefi: hedefSoru, haftaCalismaSayisi: hedefGun });
-      modalKapat();
-      bildir('Kaydedildi', 'Çalışma hedeflerin güncellendi.');
-    } catch (e) {
-      console.error('[Profil] hedef kaydetme hatası:', e);
-      bildir('Hata', 'Hedefler kaydedilemedi, tekrar dene.');
     } finally {
       setIslemYukleniyor(false);
     }
@@ -369,7 +345,6 @@ export default function Profil() {
               profil={profil}
               onKocHafiza={() => router.push('/koc-hafiza' as any)}
               onSinif={sinifAc}
-              onHedefler={hedeflerAc}
               onSifre={() => setAktifModal('sifre')}
               onEposta={() => setAktifModal('eposta')}
               onKvkk={() => setAktifModal('kvkk')}
@@ -468,29 +443,6 @@ export default function Profil() {
               {islemYukleniyor
                 ? <ActivityIndicator size="small" color={COLORS.white} />
                 : <Text style={s.onayMetin}>Hesabı Sil</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Çalışma Hedefleri modal ── */}
-      <Modal visible={aktifModal === 'hedefler'} transparent animationType="slide" statusBarTranslucent>
-        <Pressable style={s.overlay} onPress={modalKapat} />
-        <View style={s.altSheet}>
-          <View style={s.tutamac} />
-          <Text style={s.sheetBaslik}>Çalışma Hedefleri</Text>
-          <Text style={s.hedefEtiket}>Günlük soru hedefi</Text>
-          <Stepper deger={hedefSoru} min={0} max={500} adim={5} birim="soru" onChange={setHedefSoru} />
-          <Text style={[s.hedefEtiket, { marginTop: 16 }]}>Haftalık çalışma günü</Text>
-          <Stepper deger={hedefGun} min={1} max={7} adim={1} birim="gün" onChange={setHedefGun} />
-          <View style={[s.btnRow, { marginTop: 22 }]}>
-            <TouchableOpacity style={s.iptalBtn} onPress={modalKapat} activeOpacity={0.8}>
-              <Text style={s.iptalMetin}>İptal</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.onayBtn} onPress={hedefleriKaydet} activeOpacity={0.8} disabled={islemYukleniyor}>
-              {islemYukleniyor
-                ? <ActivityIndicator size="small" color={COLORS.white} />
-                : <Text style={s.onayMetin}>Kaydet</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -694,12 +646,11 @@ function GenelSekme({
 // ─── Ayarlar sekmesi ─────────────────────────────────────────────────────────
 
 function AyarlarSekme({
-  profil, onKocHafiza, onSinif, onHedefler, onSifre, onEposta, onKvkk, onCikis, onHesapSil,
+  profil, onKocHafiza, onSinif, onSifre, onEposta, onKvkk, onCikis, onHesapSil,
 }: {
   profil: ProfilType | null;
   onKocHafiza: () => void;
   onSinif: () => void;
-  onHedefler: () => void;
   onSifre: () => void;
   onEposta: () => void;
   onKvkk: () => void;
@@ -710,7 +661,6 @@ function AyarlarSekme({
     <View>
       <Group header="Tercihler">
         <Row icon="school-outline" etiket="Sınıf" deger={sinifTam(profil?.sinif)} chevron onPress={onSinif} />
-        <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron onPress={onHedefler} />
         <Row icon="sparkles-outline" etiket="Koç Hafızam" chevron onPress={onKocHafiza} son />
       </Group>
 
@@ -935,40 +885,6 @@ function SifreGiris({
   );
 }
 
-function Stepper({
-  deger, min, max, adim, birim, onChange,
-}: {
-  deger: number;
-  min: number;
-  max: number;
-  adim: number;
-  birim: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <View style={s.stepperRow}>
-      <TouchableOpacity
-        style={s.stepperBtn}
-        onPress={() => onChange(Math.max(min, deger - adim))}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="remove" size={20} color={COLORS.text} />
-      </TouchableOpacity>
-      <View style={s.stepperOrta}>
-        <Text style={s.stepperSayi}>{deger}</Text>
-        <Text style={s.stepperBirim}>{birim}</Text>
-      </View>
-      <TouchableOpacity
-        style={[s.stepperBtn, s.stepperArti]}
-        onPress={() => onChange(Math.min(max, deger + adim))}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="add" size={20} color="#fff" />
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 // ─── Stiller ─────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
@@ -1158,20 +1074,6 @@ const s = StyleSheet.create({
   sinifBaslik: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   sinifAlt: { fontSize: 12, color: COLORS.textSecondary, marginTop: 1 },
 
-  // Çalışma hedefleri stepper
-  hedefEtiket: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 10 },
-  stepperRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: COLORS.background, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 5,
-  },
-  stepperBtn: {
-    width: 46, height: 46, borderRadius: 11, justifyContent: 'center', alignItems: 'center',
-    backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.cardBorder,
-  },
-  stepperArti: { backgroundColor: COLORS.primary, borderWidth: 0 },
-  stepperOrta: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
-  stepperSayi: { fontSize: 24, fontWeight: '800', color: COLORS.text, fontVariant: ['tabular-nums'] },
-  stepperBirim: { fontSize: 13, fontWeight: '700', color: COLORS.textLight },
   sifreInputSarici: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.background, borderRadius: 12,

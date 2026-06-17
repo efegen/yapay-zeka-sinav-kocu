@@ -9,8 +9,9 @@ export interface UserModel {
   hedefUniversite: string;
   hedefBolum: string;
   hedefProgramId: string;
-  haftaCalismaSayisi: number;
-  gunlukSoruHedefi: number;
+  // Eski kullanıcılarda bulunabilen, artık toplanmayan çalışma hedefi alanları
+  haftaCalismaSayisi?: number;
+  gunlukSoruHedefi?: number;
   kvkkOnay: boolean;
   kvkkOnayTarihi: string;
   olusturmaTarihi: any;

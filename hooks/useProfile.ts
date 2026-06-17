@@ -14,8 +14,9 @@ export interface Profil {
   hedefProgramId?: string;
   hedefSiralama?: number;
   sinif: string;
-  gunlukSoruHedefi: number;
-  haftaCalismaSayisi: number;
+  // Eski kullanıcılarda bulunabilen, artık toplanmayan çalışma hedefi alanları
+  gunlukSoruHedefi?: number;
+  haftaCalismaSayisi?: number;
   hedefNetBilgisi?: Record<string, number>;
   netFetchStatus?: string;
   netFetchRetryCount?: number;
