@@ -61,6 +61,46 @@ const GUNLUK_SORU_SECENEKLERI = [
   { deger: 100, baslik: '100', alt: 'soru / gün' },
 ];
 
+const KVKK_METNI = `Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) kapsamında, Yapay Zekâ Destekli Sınav Koçu (YZDSK) uygulamasını kullanırken kişisel verilerinin nasıl işlendiğini açıklar.
+
+1. İşlenen veriler
+• Kimlik/iletişim: ad-soyad, e-posta.
+• Akademik: sınıf, okul türü, diploma notu, hedef üniversite/bölüm/sıralama, puan türü.
+• Çalışma verileri: deneme sonuçların, görevlerin, yanlış defterin, koç hafızan, çalışma istatistiklerin.
+
+2. İşleme amacı
+Sana kişiselleştirilmiş koçluk, çalışma planı, analiz ve soru çözümü sunmak.
+
+3. Aktarım
+Yapay zekâ analizleri için ilgili veriler, hizmet sağlayıcı OpenAI'ın sunucularına işlenmek üzere güvenli bağlantı (HTTPS) ile iletilir.
+
+4. Saklama ve güvenlik
+Verilerin Google Firebase altyapısında, yalnızca senin erişebildiğin şekilde saklanır.
+
+5. Haklarınız
+KVKK'nın 11. maddesi uyarınca verilerine erişme, düzeltme ve silinmesini isteme hakkın vardır. Bunları uygulama içinden Profil > Ayarlar > "Verilerimi İndir" ve "Hesabımı Sil" ile kullanabilirsin.
+
+Bu uygulama akademik bir bitirme projesidir.`;
+
+const SOZLESME_METNI = `Yapay Zekâ Destekli Sınav Koçu (YZDSK) Kullanıcı Sözleşmesi
+
+1. Hizmet
+YZDSK; YKS hazırlığına yönelik koçluk, çalışma planı, deneme takibi ve yapay zekâ destekli analiz sunar.
+
+2. Tahmini bilgiler
+Uygulamadaki puan, sıralama ve net tahminleri YÖKAtlas verilerine dayalı yaklaşık değerlerdir; kesin sonuç veya yerleşme garantisi vermez. Nihai kararlarında resmî ÖSYM/YÖK kaynaklarını esas al.
+
+3. Hesap güvenliği
+Hesabının ve şifrenin güvenliğinden sen sorumlusun; bilgilerini üçüncü kişilerle paylaşma.
+
+4. Uygun kullanım
+Uygulamayı yalnızca kendi sınav hazırlığın için kullanmayı, sistemi kötüye kullanmamayı kabul edersin.
+
+5. Sorumluluk
+Uygulama "olduğu gibi" sunulur; geliştiriciler kullanımdan doğan dolaylı zararlardan sorumlu tutulamaz.
+
+Bu uygulama akademik bir bitirme projesidir.`;
+
 interface SelectCardProps {
   baslik: string;
   alt?: string;
@@ -96,6 +136,7 @@ export default function OnboardingScreen() {
   const [kvkk1, setKvkk1] = useState(false);
   const [kvkk2, setKvkk2] = useState(false);
   const [adim1Hatalar, setAdim1Hatalar] = useState<Record<string, string>>({});
+  const [aktifMetin, setAktifMetin] = useState<null | 'sozlesme' | 'kvkk'>(null);
 
   // Adım 2
   const [sinif, setSinif] = useState('');
@@ -303,9 +344,9 @@ export default function OnboardingScreen() {
                   {kvkk1 && <Text style={styles.checkmark}>✓</Text>}
                 </View>
                 <Text style={styles.kvkkYazi}>
-                  <Text style={styles.kvkkLink}>Kullanıcı Sözleşmesi</Text>
+                  <Text style={styles.kvkkLink} onPress={() => setAktifMetin('sozlesme')}>Kullanıcı Sözleşmesi</Text>
                   {' ve '}
-                  <Text style={styles.kvkkLink}>KVKK Aydınlatma Metni</Text>
+                  <Text style={styles.kvkkLink} onPress={() => setAktifMetin('kvkk')}>KVKK Aydınlatma Metni</Text>
                   {"'ni okudum ve kabul ediyorum."}
                 </Text>
               </TouchableOpacity>
@@ -702,6 +743,35 @@ export default function OnboardingScreen() {
           </LinearGradient>
         </TouchableOpacity>
       </View>
+
+      {/* Yasal metin (KVKK / Kullanıcı Sözleşmesi) okuma modalı */}
+      <Modal
+        visible={aktifMetin !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAktifMetin(null)}
+      >
+        <SafeAreaView style={modalStyles.container}>
+          <View style={modalStyles.header}>
+            <View style={modalStyles.headerIkon}>
+              <Text style={{ fontSize: 22 }}>📄</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={modalStyles.headerBaslik}>
+                {aktifMetin === 'kvkk' ? 'KVKK Aydınlatma Metni' : 'Kullanıcı Sözleşmesi'}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setAktifMetin(null)} style={modalStyles.kapatButon}>
+              <Text style={modalStyles.kapatButonYazi}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+            <Text style={styles.yasalMetin}>
+              {aktifMetin === 'kvkk' ? KVKK_METNI : SOZLESME_METNI}
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1059,7 +1129,8 @@ const styles = StyleSheet.create({
     fontSize: 13, color: COLORS.textSecondary,
     flex: 1, lineHeight: 20,
   },
-  kvkkLink: { color: COLORS.primary, fontWeight: '700' },
+  kvkkLink: { color: COLORS.primary, fontWeight: '700', textDecorationLine: 'underline' },
+  yasalMetin: { fontSize: 14, color: COLORS.text, lineHeight: 22 },
   infoKutu: {
     backgroundColor: COLORS.primaryLight, borderRadius: 14,
     padding: 14, marginTop: 12,

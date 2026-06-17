@@ -20,9 +20,10 @@ import {
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
 import { dersRenk } from '../../constants/dersler';
-import { YKS_TARIHI } from '../../constants/sinav';
+import { hedefYksTarihi } from '../../constants/sinav';
 import { Ring } from '../../components/koc/Ring';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
+import { useProfile } from '../../hooks/useProfile';
 import { bildir } from '../../utils/bildirim';
 
 const PRIMARY = COLORS.primary;
@@ -35,14 +36,6 @@ const AY_ADLARI = [
   'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
   'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
 ];
-
-// YKS oturumları — TYT sınav günü ve ertesi gün AYT.
-const TYT_TARIHI = YKS_TARIHI;
-const AYT_TARIHI = new Date(
-  YKS_TARIHI.getFullYear(),
-  YKS_TARIHI.getMonth(),
-  YKS_TARIHI.getDate() + 1
-);
 
 // Pazartesi-başlangıçlı gün indeksi (0 = Pazartesi).
 function pazartesiIndeksi(jsGun: number): number {
@@ -91,11 +84,19 @@ function gunMu(g: Gorev, gun: number): boolean {
 export default function Takvim() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { profil } = useProfile();
   const bugun = useMemo(() => {
     const t = new Date();
     t.setHours(0, 0, 0, 0);
     return t;
   }, []);
+
+  // YKS oturumları sınıfa göre: 11. sınıf bir SONRAKİ YKS'ye girer (TYT, ertesi gün AYT).
+  const TYT_TARIHI = useMemo(() => hedefYksTarihi(profil?.sinif), [profil?.sinif]);
+  const AYT_TARIHI = useMemo(
+    () => new Date(TYT_TARIHI.getFullYear(), TYT_TARIHI.getMonth(), TYT_TARIHI.getDate() + 1),
+    [TYT_TARIHI]
+  );
 
   const [goruntulenen, setGoruntulenen] = useState(() => ({
     ay: bugun.getMonth(),

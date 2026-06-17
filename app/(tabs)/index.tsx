@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfile } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
-import { YKS_TARIHI, YKS_SEZON_BASLANGIC, YKS_YIL } from '../../constants/sinav';
+import { YKS_SEZON_BASLANGIC, hedefYksTarihi, hedefYksYili } from '../../constants/sinav';
 import { gunFarki, tarihUzun, aralikOrani } from '../../utils/tarih';
 import { auth } from '../../services/firebaseConfig';
 import { denemeleriGetir } from '../../services/firestoreService';
@@ -83,9 +83,12 @@ export default function AnaSayfa() {
 
   const bugun = useMemo(() => new Date(), []);
   const tarihMetni = `${GUNLER[bugun.getDay()]} · ${bugun.getDate()} ${AYLAR[bugun.getMonth()]}`;
-  const kalanGun = useMemo(() => gunFarki(YKS_TARIHI), []);
-  const sinavTarihMetni = useMemo(() => tarihUzun(YKS_TARIHI), []);
-  const sezonOrani = useMemo(() => aralikOrani(YKS_SEZON_BASLANGIC, YKS_TARIHI), []);
+  // Hedef YKS sınıfa göre değişir: 11. sınıf bir sonraki YKS'ye girer.
+  const hedefTarih = useMemo(() => hedefYksTarihi(profil?.sinif), [profil?.sinif]);
+  const hedefYil = hedefYksYili(profil?.sinif);
+  const kalanGun = useMemo(() => gunFarki(hedefTarih), [hedefTarih]);
+  const sinavTarihMetni = useMemo(() => tarihUzun(hedefTarih), [hedefTarih]);
+  const sezonOrani = useMemo(() => aralikOrani(YKS_SEZON_BASLANGIC, hedefTarih), [hedefTarih]);
 
   // ── Denemelerden tahmini sıralama (son tam TYT+AYT denemesi) ──
   const uid = auth.currentUser?.uid;
@@ -226,7 +229,7 @@ export default function AnaSayfa() {
 
             <View style={styles.heroUst}>
               <View style={{ flexShrink: 1 }}>
-                <Text style={styles.heroEtiket}>YKS {YKS_YIL}’YA KALAN</Text>
+                <Text style={styles.heroEtiket}>YKS {hedefYil}’YA KALAN</Text>
                 <View style={styles.heroSayiSatir}>
                   <Text style={styles.heroSayi}>{kalanGun}</Text>
                   <Text style={styles.heroGun}>gün</Text>
