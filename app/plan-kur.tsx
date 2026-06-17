@@ -22,6 +22,7 @@ import { auth } from '../services/firebaseConfig';
 import { Adim, AdimTip, Gorev, gorevEkle, gunGorevleriniGetir } from '../services/firestoreService';
 import { COLORS } from '../constants/colors';
 import { dersRenk } from '../constants/dersler';
+import { yksSinavGunuMu } from '../constants/sinav';
 import { bildir } from '../utils/bildirim';
 
 const AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -94,10 +95,14 @@ export default function PlanKur() {
     return t;
   }, [params.tarih]);
 
+  // YKS sınav gününe (TYT/AYT) çalışma planı eklenemez.
+  const sinavGunu = useMemo(() => yksSinavGunuMu(hedefTarih), [hedefTarih]);
+
   const [baslik, setBaslik] = useState('');
   const [secili, setSecili] = useState<{ grup: string; ders: string } | null>(null);
   const [adimlar, setAdimlar] = useState<Adim[]>([]);
-  const [ayarIndex, setAyarIndex] = useState<number | null>(null);
+  // Ayar sayfası: hangi adım + hangi alanı (dk/soru) düzenlemek için açıldığı.
+  const [ayar, setAyar] = useState<{ index: number; odak: 'dk' | 'soru' } | null>(null);
   const [saat, setSaat] = useState(''); // '' = tüm gün · 'HH:MM' = başlangıç saati
   const [saatPickerAcik, setSaatPickerAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -135,6 +140,10 @@ export default function PlanKur() {
 
   async function olustur() {
     if (!uid) return;
+    if (sinavGunu) {
+      bildir('Sınav günü', 'YKS sınav gününe çalışma planı eklenemez. Lütfen başka bir gün seç.');
+      return;
+    }
     if (!baslik.trim()) {
       bildir('Eksik bilgi', 'Önce ne çalışacağını yaz.');
       return;
@@ -221,6 +230,13 @@ export default function PlanKur() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 28, gap: 16 }}
         >
+          {sinavGunu && (
+            <View style={styles.sinavUyari}>
+              <Ionicons name="flag" size={16} color={COLORS.accent} />
+              <Text style={styles.sinavUyariMetin}>Bu gün YKS sınav günü — plan eklenemez.</Text>
+            </View>
+          )}
+
           {/* ─── Başlık alanı (düzenlenebilir) ─── */}
           <View>
             <Text style={[styles.etiket, { marginBottom: 8 }]}>Ne çalışacaksın?</Text>
@@ -323,7 +339,7 @@ export default function PlanKur() {
                     adim={a}
                     renk={renk}
                     onAd={(t) => adimAdDegis(i, t)}
-                    onAyar={() => setAyarIndex(i)}
+                    onAyar={(odak) => setAyar({ index: i, odak })}
                     onSil={() => adimSil(i)}
                   />
                 ))}
@@ -355,12 +371,12 @@ export default function PlanKur() {
 
         {/* ─── Footer ─── */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
-          <TouchableOpacity activeOpacity={0.9} onPress={olustur} disabled={kaydediliyor}>
+          <TouchableOpacity activeOpacity={0.9} onPress={olustur} disabled={kaydediliyor || sinavGunu}>
             <LinearGradient
               colors={[COLORS.primary, COLORS.accent]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[styles.olusturBtn, kaydediliyor && { opacity: 0.8 }]}
+              style={[styles.olusturBtn, (kaydediliyor || sinavGunu) && { opacity: 0.5 }]}
             >
               {kaydediliyor ? (
                 <ActivityIndicator color="#fff" />
@@ -420,13 +436,14 @@ export default function PlanKur() {
       )}
 
       <AyarModal
-        acik={ayarIndex !== null}
-        adim={ayarIndex !== null ? adimlar[ayarIndex] : null}
+        acik={ayar !== null}
+        adim={ayar !== null ? adimlar[ayar.index] : null}
+        odak={ayar?.odak ?? 'dk'}
         renk={renk}
-        onKapat={() => setAyarIndex(null)}
+        onKapat={() => setAyar(null)}
         onKaydet={(dk, soru) => {
-          if (ayarIndex !== null) adimAyarKaydet(ayarIndex, dk, soru);
-          setAyarIndex(null);
+          if (ayar !== null) adimAyarKaydet(ayar.index, dk, soru);
+          setAyar(null);
         }}
       />
     </View>
@@ -492,12 +509,13 @@ function AdimSatiri({
   adim: Adim;
   renk: string;
   onAd: (ad: string) => void;
-  onAyar: () => void;
+  onAyar: (odak: 'dk' | 'soru') => void;
   onSil: () => void;
 }) {
   const soru = adim.tip === 'soru';
   const c = adimRenk(adim.tip, renk);
-  const meta = soru ? `${adim.soru ?? 0} soru · netine işlenir` : ADIM_META[adim.tip].meta;
+  // Soru adımında sayı artık kendi pill'inde düzenlenir; meta satırı sade kalır.
+  const meta = soru ? 'netine işlenir' : ADIM_META[adim.tip].meta;
   return (
     <View style={[styles.adimSatir, { borderColor: soru ? renk + '40' : COLORS.cardBorder }]}>
       <Ionicons name="ellipsis-vertical" size={15} color={COLORS.textLight} />
@@ -516,7 +534,18 @@ function AdimSatiri({
           {meta}
         </Text>
       </View>
-      <TouchableOpacity style={styles.dkPill} onPress={onAyar} activeOpacity={0.75}>
+      {/* Soru sayısı doğrudan düzenlenebilir pill — ders renginde, "netine işlenen" değer. */}
+      {soru && (
+        <TouchableOpacity
+          style={[styles.soruPill, { backgroundColor: renk + '14', borderColor: renk + '55' }]}
+          onPress={() => onAyar('soru')}
+          activeOpacity={0.75}
+        >
+          <Text style={[styles.soruPillSayi, { color: renk }]}>{adim.soru ?? 0}</Text>
+          <Text style={[styles.soruPillBirim, { color: renk }]}>soru</Text>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity style={styles.dkPill} onPress={() => onAyar('dk')} activeOpacity={0.75}>
         <Text style={styles.dkPillSayi}>{adim.dk}</Text>
         <Text style={styles.dkPillBirim}>dk</Text>
       </TouchableOpacity>
@@ -532,12 +561,14 @@ function AdimSatiri({
 function AyarModal({
   acik,
   adim,
+  odak,
   renk,
   onKapat,
   onKaydet,
 }: {
   acik: boolean;
   adim: Adim | null;
+  odak: 'dk' | 'soru';
   renk: string;
   onKapat: () => void;
   onKaydet: (dk: number, soru: number) => void;
@@ -553,6 +584,8 @@ function AyarModal({
   }, [acik, adim]);
 
   const soruVar = adim?.tip === 'soru';
+  // Soru pill'inden açıldıysa soru alanını, aksi halde süreyi vurgula.
+  const soruOdak = soruVar && odak === 'soru';
 
   return (
     <Modal visible={acik} animationType="slide" transparent statusBarTranslucent>
@@ -561,15 +594,15 @@ function AyarModal({
         <View style={styles.sheetTutamac} />
         <Text style={styles.sheetBaslik}>{adim ? `${ADIM_META[adim.tip].ad} adımı` : 'Adım'}</Text>
 
-        <Text style={styles.ayarEtiket}>Süre (dakika)</Text>
-        <Stepper deger={dk} adim={5} min={5} birim="dk" renk={renk} onDegis={setDk} />
-
         {soruVar && (
           <>
             <Text style={styles.ayarEtiket}>Soru sayısı</Text>
-            <Stepper deger={soru} adim={5} min={0} birim="soru" renk={renk} onDegis={setSoru} />
+            <Stepper deger={soru} adim={5} min={0} birim="soru" renk={renk} vurgu={soruOdak} onDegis={setSoru} />
           </>
         )}
+
+        <Text style={styles.ayarEtiket}>Süre (dakika)</Text>
+        <Stepper deger={dk} adim={5} min={5} birim="dk" renk={renk} vurgu={soruVar && !soruOdak} onDegis={setDk} />
 
         <TouchableOpacity
           style={[styles.ayarKaydet, { backgroundColor: renk }]}
@@ -589,6 +622,7 @@ function Stepper({
   min,
   birim,
   renk,
+  vurgu = false,
   onDegis,
 }: {
   deger: number;
@@ -596,10 +630,11 @@ function Stepper({
   min: number;
   birim: string;
   renk: string;
+  vurgu?: boolean;
   onDegis: (v: number) => void;
 }) {
   return (
-    <View style={styles.stepper}>
+    <View style={[styles.stepper, vurgu && { borderColor: renk, backgroundColor: renk + '0D' }]}>
       <TouchableOpacity
         style={styles.stepperBtn}
         onPress={() => onDegis(Math.max(min, deger - adim))}
@@ -779,6 +814,17 @@ const styles = StyleSheet.create({
   },
   dkPillSayi: { fontSize: 14, fontWeight: '800', color: COLORS.text },
   dkPillBirim: { fontSize: 10, fontWeight: '700', color: COLORS.textLight },
+  soruPill: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    borderWidth: 1,
+  },
+  soruPillSayi: { fontSize: 14, fontWeight: '800' },
+  soruPillBirim: { fontSize: 10, fontWeight: '700' },
   silBtn: {
     width: 26,
     height: 26,
@@ -831,6 +877,17 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   olusturMetin: { fontSize: 16, fontWeight: '800', color: '#fff' },
+  sinavUyari: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    padding: 13,
+    borderRadius: 14,
+    backgroundColor: COLORS.accent + '14',
+    borderWidth: 1,
+    borderColor: COLORS.accent + '40',
+  },
+  sinavUyariMetin: { flex: 1, fontSize: 13, fontWeight: '700', color: COLORS.accent },
 
   // Ayar modalı
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },

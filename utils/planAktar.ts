@@ -116,27 +116,48 @@ export function dersBul(odak: string): string {
   return 'Genel';
 }
 
-// İş satırlarını adımlara çevir; toplam dakikayı eşit (son adım kalanı alır) böl.
-function islerdenAdimlar(isler: string[], toplamDk: number): Adim[] | undefined {
-  const temiz = (isler || []).map((x) => String(x ?? '').trim()).filter(Boolean);
-  const n = temiz.length;
-  if (!n) return undefined;
+// Ders bazlı çözüm temposu (dk/soru) — çalışma hızıdır (çöz + kontrol), sınav hızından yavaştır.
+const SORU_TEMPO: Record<string, number> = {
+  Matematik: 2.4, Fizik: 2.2, Kimya: 1.9, Biyoloji: 1.7, Türkçe: 1.3, Genel: 1.8,
+};
+// Soru sayısı yazılmamış çözüm adımına atanan ders bazlı makul varsayılan (≈30-40 dk'lık blok).
+const VARSAYILAN_SORU: Record<string, number> = {
+  Matematik: 14, Fizik: 15, Kimya: 18, Biyoloji: 20, Türkçe: 25, Genel: 18,
+};
 
-  const taban = Math.max(5, Math.floor(toplamDk / n) || 5);
-  let kalan = toplamDk;
-  return temiz.map((ad, i) => {
-    const sonMu = i === n - 1;
-    const dk = sonMu ? Math.max(5, kalan) : taban;
-    kalan -= dk;
-    // Mola önce: "mola/dinlen/nefes" geçen satırlar dinlenme adımıdır (soru/net yok).
-    const mola = /(mola|dinlen|nefes)/i.test(ad);
-    const soru = !mola && /(soru|çöz|coz|test)/i.test(ad);
-    const adim: Adim = { tip: mola ? 'mola' : soru ? 'soru' : 'oku', ad, dk, done: false };
-    if (soru) {
-      const m = ad.match(/(\d+)\s*soru/i);
-      if (m) adim.soru = parseInt(m[1], 10);
+// İş metnindeki AÇIK süreyi çek ("30 dk", "1.5 saat"). Birimsiz çıplak sayıyı YOK SAYAR
+// (örn. "Ünite 3 tekrar"daki 3'ü süre sanmaz). Bulamazsa null.
+function metindenDk(ad: string): number | null {
+  const m = ad.toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(saat|dk|dakika|dakka|min)/);
+  if (!m) return null;
+  const val = parseFloat(m[1].replace(',', '.'));
+  return /saat/.test(m[2]) ? Math.round(val * 60) : Math.round(val);
+}
+
+// İş satırlarını adımlara çevir. Süre, naif eşit-bölme yerine GERÇEKÇİ hesaplanır:
+// soru adımı = soru sayısı × ders temposu; konu tekrarı/okuma = açık süre ya da ~40 dk; mola ~10 dk.
+// Soru adımında sayı yazılmamışsa ders bazlı varsayılan atanır → asla "0 soru" görünmez.
+function islerdenAdimlar(isler: string[], ders: string): Adim[] | undefined {
+  const temiz = (isler || []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (!temiz.length) return undefined;
+  const tempo = SORU_TEMPO[ders] ?? SORU_TEMPO.Genel;
+
+  return temiz.map((ad) => {
+    if (/(mola|dinlen|nefes)/i.test(ad)) {
+      const dk = Math.max(5, Math.min(20, metindenDk(ad) ?? 10));
+      return { tip: 'mola', ad, dk, done: false } as Adim;
     }
-    return adim;
+    if (/(soru|çöz|coz|test)/i.test(ad)) {
+      const m = ad.match(/(\d+)\s*(?:soru|test)/i);
+      const sayi = m
+        ? Math.max(3, Math.min(80, parseInt(m[1], 10)))
+        : VARSAYILAN_SORU[ders] ?? VARSAYILAN_SORU.Genel;
+      const dk = Math.max(10, Math.min(180, Math.round(sayi * tempo)));
+      return { tip: 'soru', ad, dk, soru: sayi, done: false } as Adim;
+    }
+    // konu tekrarı / okuma
+    const dk = Math.max(15, Math.min(90, metindenDk(ad) ?? 40));
+    return { tip: 'oku', ad, dk, done: false } as Adim;
   });
 }
 
@@ -154,18 +175,18 @@ export function planiTaslaklaraCevir(gunler: PlanGun[], bugun: Date): GunTaslak[
   const gecerli = (gunler || []).filter((g) => g && String(g.odak ?? '').trim());
   const tarihler = planGunTarihleri(gecerli, bugun);
   return gecerli.map((g, i) => {
-    const dakika = dakikaCoz(g.sure) || 60; // çözülemezse makul varsayılan
     const odak = String(g.odak ?? '').trim();
-    const adimlar = islerdenAdimlar(g.isler ?? [], dakika);
-    // Adım varsa süre = adım toplamı (plan detayıyla tutarlı olsun).
-    const toplam = adimlar ? adimlar.reduce((t, a) => t + a.dk, 0) : dakika;
+    const ders = dersBul(odak);
+    const adimlar = islerdenAdimlar(g.isler ?? [], ders);
+    // Süre adımlardan TÜRETİLİR (gerçekçi tempo); işsiz günde model süresine düş.
+    const dakika = adimlar ? adimlar.reduce((t, a) => t + a.dk, 0) : dakikaCoz(g.sure) || 60;
     return {
       gunAdi: String(g.gun ?? `${i + 1}. gün`),
       tarih: tarihler[i],
       baslik: odak,
-      ders: dersBul(odak),
+      ders,
       tur: /deneme/i.test(odak) ? 'deneme' : 'plan',
-      dakika: toplam,
+      dakika,
       adimlar,
     };
   });
