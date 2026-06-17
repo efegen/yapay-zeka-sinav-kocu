@@ -4,7 +4,7 @@
 
 import { Timestamp } from 'firebase/firestore';
 import { COLORS } from '../constants/colors';
-import type { HataAnaliziKaydi } from '../utils/hataAnalizi';
+import { hataAnaliziAiOzeti, type HataAnaliziKaydi } from '../utils/hataAnalizi';
 
 export type Kapsam = 'tyt' | 'ayt' | 'ikisi';
 export type Alan = 'SAY' | 'EA' | 'SOZ' | 'DIL';
@@ -213,5 +213,9 @@ export function denemeAiOzeti(d: DenemeSonuc): string {
     parcalar.push(`AYT ${fmtNet(d.aytNet)} net (${dersOzet(alan.testler)})`);
   }
   const tarih = typeof d.tarih?.toDate === 'function' ? tarihKisa(d.tarih.toDate()) : '';
-  return `${tarih ? `${tarih} · ` : ''}${d.ad}: ${parcalar.join(' · ')}`;
+  let ozet = `${tarih ? `${tarih} · ` : ''}${d.ad}: ${parcalar.join(' · ')}`;
+  // Hata analizi yapıldıysa kök-neden bağlamını da ekle: koç hangi hatadan net kaçtığını görsün.
+  const ha = hataAnaliziAiOzeti(d.hataAnalizi);
+  if (ha) ozet += ` · ${ha}`;
+  return ozet;
 }

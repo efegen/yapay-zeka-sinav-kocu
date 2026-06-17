@@ -94,6 +94,15 @@ export function kategorize(metin: string): NedenKategori | null {
   return enIyi; // hiç eşleşme yoksa null
 }
 
+// "Optik, Hareket" → ["Optik", "Hareket"] · en çok 4 konu (kaba/uzun girişleri sınırla).
+export function konulariAyikla(raw: string): string[] {
+  return raw
+    .split(/[,;\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
 // ── Toplulaştırma / rapor ──────────────────────────────────────────────
 
 /** Ders bazında tek bir hata girdisi (ekrandan toplanır). */
@@ -106,11 +115,17 @@ export interface DersHata {
   not?: string;
 }
 
+// Dağılımdaki tek ders satırı — öğrencinin kendi açıklamasını (not) raporda geri gösterebilmek için taşır.
+export interface DersKalemi {
+  ad: string;
+  not?: string;
+}
+
 export interface KategoriDagilim {
   kategori: NedenKategori;
   dersSayisi: number;
   kayipNet: number;
-  dersler: string[];
+  dersler: DersKalemi[];
 }
 
 export interface HataAnaliziRapor {
@@ -134,10 +149,10 @@ export function analizYap(hatalar: DersHata[]): HataAnaliziRapor {
     toplamKayipNet += h.kayipNet;
     const d =
       harita.get(h.kategori) ??
-      { kategori: h.kategori, dersSayisi: 0, kayipNet: 0, dersler: [] as string[] };
+      { kategori: h.kategori, dersSayisi: 0, kayipNet: 0, dersler: [] as DersKalemi[] };
     d.dersSayisi += 1;
     d.kayipNet += h.kayipNet;
-    d.dersler.push(h.ders);
+    d.dersler.push({ ad: h.ders, not: h.not });
     harita.set(h.kategori, d);
   }
 
@@ -167,4 +182,44 @@ export interface HataAnaliziKaydi {
   eksikKonular: string[];
   toplamKayipNet: number;
   tarih: string; // ISO — analizin yapıldığı an
+}
+
+// Türkçe ondalık (12.5 → "12,5"). fmtNet'i deneme.ts'ten almıyoruz: bu modülü oraya bağlamak
+// döngüsel import yaratır (deneme.ts zaten buradan import ediyor) — bu yüzden yerelde tutuluyor.
+function netMetni(n: number): string {
+  const s = Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return s.replace('.', ',');
+}
+
+/**
+ * Kaydedilmiş hata analizini AI koçu için tek satırlık bağlama çevirir: baskın kök neden +
+ * kaçan net + kategori→ders dağılımı + öğrencinin yazdığı eksik konular. Koç "neyi neden
+ * kaçırıyor" görüp planı kişiselleştirsin diye alır. Analiz yoksa boş string döner.
+ */
+export function hataAnaliziAiOzeti(kayit?: HataAnaliziKaydi): string {
+  if (!kayit || !kayit.hatalar.length) return '';
+
+  const grup = new Map<NedenKategori, string[]>();
+  for (const h of kayit.hatalar) {
+    const arr = grup.get(h.kategori) ?? [];
+    arr.push(h.ders);
+    grup.set(h.kategori, arr);
+  }
+
+  const parcalar: string[] = [`~${netMetni(kayit.toplamKayipNet)} net kayıp`];
+  if (kayit.baskinKategori) parcalar.push(`en çok ${KATEGORILER[kayit.baskinKategori].ad}`);
+  parcalar.push(
+    Array.from(grup.entries())
+      .map(([k, ders]) => `${KATEGORILER[k].ad}: ${ders.join(', ')}`)
+      .join('; ')
+  );
+
+  // Öğrencinin GERÇEK yazdığı eksik konular (ders adı değil) — koç planı bunlara öncelik versin.
+  const konular = kayit.hatalar
+    .filter((h) => h.kategori === 'bilgi' && h.konu)
+    .flatMap((h) => konulariAyikla(h.konu!))
+    .slice(0, 6);
+  if (konular.length) parcalar.push(`eksik konular: ${konular.join(', ')}`);
+
+  return `Hata analizi — ${parcalar.join(' · ')}`;
 }

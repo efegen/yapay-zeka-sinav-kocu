@@ -28,6 +28,7 @@ import {
   kategorize,
   analizYap,
   kayipNetHesapla,
+  konulariAyikla,
   type NedenKategori,
   type DersHata,
   type HataAnaliziRapor,
@@ -53,6 +54,61 @@ interface HataliDers {
   foy: 'TYT' | 'AYT';
 }
 
+// Denemenin yanlış/boşu olan derslerini (analiz adayları) hesaplar. SAF — denemeden türetilir,
+// hem giriş formu hem de kaydedilmiş raporun yeniden kurulumu bunu paylaşır.
+function hataliDerslerHesapla(deneme: DenemeSonuc | null): HataliDers[] {
+  if (!deneme) return [];
+  const testler: Test[] = [
+    ...(deneme.kapsam !== 'ayt' ? TYT_TESTLER : []),
+    ...(deneme.kapsam !== 'tyt' ? AYT_ALANLAR[deneme.alan].testler : []),
+  ];
+  const out: HataliDers[] = [];
+  for (const t of testler) {
+    const c = deneme.cevaplar?.[t.ad];
+    if (!c) continue; // öğrenci bu derse hiç girmemiş
+    const d = parseInt(c.d || '0', 10) || 0;
+    const y = parseInt(c.y || '0', 10) || 0;
+    const bos = Math.max(0, t.soru - d - y);
+    if (y === 0 && bos === 0) continue; // tam doğru → hata yok
+    out.push({
+      ad: t.ad,
+      yanlis: y,
+      bos,
+      kayipNet: kayipNetHesapla(y, bos),
+      foy: TYT_ADLARI.has(t.ad) ? 'TYT' : 'AYT',
+    });
+  }
+  return out;
+}
+
+// Kaydedilmiş analizden rapor görünümünü yeniden kurar (geri girişte formu değil sonucu göster).
+// Net/yanlış/boş kayda yazılmıyor; denemeden taze hesaplanıp kategoriyle eşleştirilir.
+function raporKur(
+  deneme: DenemeSonuc
+): { rapor: HataAnaliziRapor; konular: { konu: string; ders: string }[] } | null {
+  const kayit = deneme.hataAnalizi;
+  if (!kayit) return null;
+  const byAd = new Map(hataliDerslerHesapla(deneme).map((h): [string, HataliDers] => [h.ad, h]));
+  const hatalar: DersHata[] = kayit.hatalar.map((r) => {
+    const h = byAd.get(r.ders);
+    return {
+      ders: r.ders,
+      yanlis: h?.yanlis ?? 0,
+      bos: h?.bos ?? 0,
+      kayipNet: h?.kayipNet ?? 0,
+      kategori: r.kategori,
+      not: r.not,
+    };
+  });
+  const konular: { konu: string; ders: string }[] = [];
+  for (const r of kayit.hatalar) {
+    if (r.kategori !== 'bilgi' || !r.konu) continue;
+    const foy = byAd.get(r.ders)?.foy ?? 'TYT';
+    for (const k of konulariAyikla(r.konu)) konular.push({ konu: k, ders: `${foy} ${r.ders}` });
+  }
+  return { rapor: analizYap(hatalar), konular };
+}
+
 export default function HataAnaliz() {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
@@ -76,13 +132,19 @@ export default function HataAnaliz() {
       .then((list) => {
         const d = list.find((x) => x.id === id) ?? null;
         setDeneme(d);
-        // Daha önce analiz edildiyse formu o kayıttan doldur.
+        // Daha önce analiz edildiyse: formu kayıttan doldur (Düzenle için) ve raporu yeniden
+        // kur ki geri girişte seçim formu değil doğrudan sonuç ekranı açılsın.
         if (d?.hataAnalizi) {
           const on: Record<string, DersGiris> = {};
           for (const h of d.hataAnalizi.hatalar) {
             on[h.ders] = { not: h.not ?? '', kategori: h.kategori, konu: h.konu ?? '', manuel: true };
           }
           setGirisler(on);
+          const kur = raporKur(d);
+          if (kur) {
+            setRapor(kur.rapor);
+            setEklenenKonular(kur.konular);
+          }
         }
       })
       .catch((err) => console.error('[HataAnaliz] yükleme hatası:', err))
@@ -90,30 +152,7 @@ export default function HataAnaliz() {
   }, [uid, id]);
 
   // Denemede yanlış/boşu olan dersler (yalnızca öğrencinin girdiği dersler).
-  const hataliDersler = useMemo<HataliDers[]>(() => {
-    if (!deneme) return [];
-    const testler: Test[] = [
-      ...(deneme.kapsam !== 'ayt' ? TYT_TESTLER : []),
-      ...(deneme.kapsam !== 'tyt' ? AYT_ALANLAR[deneme.alan].testler : []),
-    ];
-    const out: HataliDers[] = [];
-    for (const t of testler) {
-      const c = deneme.cevaplar?.[t.ad];
-      if (!c) continue; // öğrenci bu derse hiç girmemiş
-      const d = parseInt(c.d || '0', 10) || 0;
-      const y = parseInt(c.y || '0', 10) || 0;
-      const bos = Math.max(0, t.soru - d - y);
-      if (y === 0 && bos === 0) continue; // tam doğru → hata yok
-      out.push({
-        ad: t.ad,
-        yanlis: y,
-        bos,
-        kayipNet: kayipNetHesapla(y, bos),
-        foy: TYT_ADLARI.has(t.ad) ? 'TYT' : 'AYT',
-      });
-    }
-    return out;
-  }, [deneme]);
+  const hataliDersler = useMemo<HataliDers[]>(() => hataliDerslerHesapla(deneme), [deneme]);
 
   function girisAl(ad: string): DersGiris {
     return girisler[ad] ?? { not: '', kategori: null, konu: '', manuel: false };
@@ -180,9 +219,7 @@ export default function HataAnaliz() {
       const ham = girisAl(h.ad).konu.trim();
       if (!ham) continue;
       const dersEtiket = `${h.foy} ${h.ad}`; // bağlam: "TYT Fen Bilimleri"
-      for (const k of ham.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 4)) {
-        eklenen.push({ konu: k, ders: dersEtiket });
-      }
+      for (const k of konulariAyikla(ham)) eklenen.push({ konu: k, ders: dersEtiket });
     }
 
     setEklenenKonular(eklenen);
@@ -326,8 +363,29 @@ export default function HataAnaliz() {
                     <View style={[styles.barDolu, { width: `${(d.kayipNet / maxKayip) * 100}%`, backgroundColor: meta.renk }]} />
                   </View>
                   <Text style={styles.dagDersler}>
-                    {d.dersSayisi} ders · {d.dersler.join(', ')}
+                    {d.dersSayisi} ders · {d.dersler.map((k) => k.ad).join(', ')}
                   </Text>
+                  {/* Öğrencinin kendi yazdığı açıklamalar — kategori tahminini besleyen metin artık görünür. */}
+                  {d.dersler.some((k) => k.not) && (
+                    <View style={styles.notKutu}>
+                      {d.dersler
+                        .filter((k) => k.not)
+                        .map((k) => (
+                          <View key={k.ad} style={styles.notSatir}>
+                            <Ionicons
+                              name="chatbubble-ellipses-outline"
+                              size={12}
+                              color={meta.renk}
+                              style={{ marginTop: 2 }}
+                            />
+                            <Text style={styles.notMetin}>
+                              <Text style={styles.notDers}>{k.ad}: </Text>
+                              {k.not}
+                            </Text>
+                          </View>
+                        ))}
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -589,6 +647,10 @@ const styles = StyleSheet.create({
   barYol: { height: 8, borderRadius: 99, backgroundColor: COLORS.backgroundSecondary, overflow: 'hidden' },
   barDolu: { height: 8, borderRadius: 99 },
   dagDersler: { fontSize: 11.5, fontWeight: '600', color: COLORS.textLight },
+  notKutu: { gap: 5, marginTop: 6 },
+  notSatir: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  notMetin: { flex: 1, fontSize: 12, fontWeight: '500', color: COLORS.textSecondary, lineHeight: 17, fontStyle: 'italic' },
+  notDers: { fontWeight: '800', fontStyle: 'normal', color: COLORS.text },
 
   // ── Rapor: öneri ──
   oneriKart: {
