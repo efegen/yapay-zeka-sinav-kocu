@@ -56,7 +56,10 @@ function kontrolKurtar(s: string, tamMat: boolean): string {
     .replace(/\x08/g, '\\b')
     .replace(/\v/g, '\\v')
     .replace(/\t/g, '\\t')
-    .replace(/\r/g, '\\r');
+    .replace(/\r/g, '\\r')
+    // Geriye kalan eşlenmemiş C0 kontrol baytlarını at (satır sonu hariç). Bunlar
+    // ekranda "□" kutusu olarak görünüp LaTeX komutunu (ör. \Omega) bozabiliyor.
+    .replace(/[\x00-\x07\x0E-\x1F]/g, '');
   return tamMat ? t.replace(/\n/g, '\\n') : t;
 }
 
@@ -78,13 +81,24 @@ function kacislariDuzelt(s: string): string {
  *     (Tek tek \begin/\end sarılırsa ortam ikiye bölünür, KaTeX hata verir → kırmızı ham metin.)
  *  2) Geriye kalan tekil çıplak \komut'lar (\frac vb.) → $...$ ile sarılır.
  */
+// Tek LaTeX komutu: \harfler (\frac, \Omega…) VEYA ince boşluk komutları \, \; \: \! .
+const LTX_KOMUT = '\\\\(?:[a-zA-Z]+|[,;:!])';
+// Bitişik bir "matematik koşusu": opsiyonel baş sayı + komut + ardışık (komut/sayı/brace/üst-alt)
+// atomları. Böylece "3\,\Omega" tek parça ($3\,\Omega$) olarak sarılır; aksi halde \, çıplak
+// kalıp ekranda ham görünürdü. Salt sayı (komutsuz) ASLA sarılmaz → düz metin korunur.
+const LTX_KOSU = new RegExp(
+  '(?:\\d+(?:[.,]\\d+)?\\s*)?' +
+    LTX_KOMUT + '(?:[\\^_])?(?:\\{[^{}]*\\}){0,2}' +
+    '(?:\\s*(?:' + LTX_KOMUT + '(?:[\\^_])?(?:\\{[^{}]*\\}){0,2}|\\d+(?:[.,]\\d+)?))*',
+  'g'
+);
 function latexGuvenli(s: string): string {
   return s
     .split(/(\$\$[^$]*\$\$|\$[^$]*\$|\\begin\{[a-zA-Z]+\*?\}[\s\S]*?\\end\{[a-zA-Z]+\*?\})/g)
     .map((p) => {
       if (p.startsWith('$')) return p; // zaten math
       if (p.startsWith('\\begin')) return `$$${p}$$`; // çıplak ortamı blok math olarak sar
-      return p.replace(/\\[a-zA-Z]+(?:\{[^{}]*\}){0,2}/g, (m) => `$${m}$`);
+      return p.replace(LTX_KOSU, (m) => `$${m}$`);
     })
     .join('');
 }

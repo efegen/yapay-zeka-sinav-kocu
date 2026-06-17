@@ -103,9 +103,32 @@ export function ayristir(ham: string | null, eskiHam: string | null): Sohbet[] {
   return [];
 }
 
+// Çekmece önizlemesi tek satır DÜZ metin (KaTeX yok) → LaTeX'i okunabilir sembollere indir.
+const LATEX_SEMBOL: Record<string, string> = {
+  Omega: 'Ω', omega: 'ω', pi: 'π', theta: 'θ', alpha: 'α', beta: 'β', gamma: 'γ',
+  Delta: 'Δ', delta: 'δ', lambda: 'λ', mu: 'µ', rho: 'ρ', sigma: 'σ', phi: 'φ',
+  varphi: 'φ', tau: 'τ', epsilon: 'ε', infty: '∞', times: '×', cdot: '·',
+  div: '÷', pm: '±', mp: '∓', leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠',
+  ne: '≠', approx: '≈', equiv: '≡', rightarrow: '→', to: '→', Rightarrow: '⇒',
+  leftarrow: '←', circ: '°', degree: '°', sum: 'Σ', int: '∫',
+};
+
+/** LaTeX → önizleme için okunabilir düz metin ($a=\frac{F}{m}$ → a=F/m, \Omega → Ω). */
+function latexSade(s: string): string {
+  let t = s.replace(/[\x00-\x08\x0E-\x1F]/g, ''); // eşlenmemiş kontrol baytı kalıntısı
+  t = t.replace(/\\[dt]frac\b/g, '\\frac');
+  t = t.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '$1/$2');
+  t = t.replace(/\\sqrt\s*\{([^{}]*)\}/g, '√($1)');
+  t = t.replace(/\\([a-zA-Z]+)/g, (m, ad) => (ad in LATEX_SEMBOL ? LATEX_SEMBOL[ad] : m));
+  t = t.replace(/\\[,;:!]/g, ' '); // ince boşluk komutları
+  t = t.replace(/[\^_]\{([^{}]*)\}/g, (m, x) => (m[0] === '^' ? '^' : '_') + x);
+  t = t.replace(/\\([a-zA-Z]+)/g, '$1'); // kalan komutlardan ters bölü at
+  return t.replace(/[{}$]/g, ''); // brace ve $ sınırlayıcıları
+}
+
 /** Markdown işaretlerini sadeleştir — çekmece özeti için tek satır düz metin. */
 function duzMetin(s: string): string {
-  return s
+  return latexSade(s)
     .replace(/[*_`#>]/g, '')
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/\s+/g, ' ')
