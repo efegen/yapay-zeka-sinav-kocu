@@ -77,8 +77,12 @@ const SINAV_OTURUM: Record<'tyt' | 'ayt', { ad: string; saat: string; meta: stri
   ayt: { ad: 'YKS · 2. Oturum (AYT)', saat: '10:15', meta: 'Sınav günü · 180 dk' },
 };
 
-function gunMu(g: Gorev, gun: number): boolean {
-  return !!g.tarih && g.tarih.toDate().getDate() === gun;
+// Görev, görüntülenen ayın verilen gününe mi ait? Ay/yıl da kontrol edilir ki
+// ay değişiminde henüz tazelenmemiş eski ay verisi yanlış güne SIZMASIN (sahte veri yanıp sönmesi).
+function gunMu(g: Gorev, gun: number, yil: number, ay: number): boolean {
+  if (!g.tarih) return false;
+  const d = g.tarih.toDate();
+  return d.getFullYear() === yil && d.getMonth() === ay && d.getDate() === gun;
 }
 
 export default function Takvim() {
@@ -180,7 +184,7 @@ export default function Takvim() {
   function gunNoktalari(gun: number): string[] {
     const renkler: string[] = [];
     ayGorevleri.forEach((g) => {
-      if (gunMu(g, gun) && g.tur !== 'deneme') {
+      if (gunMu(g, gun, goruntulenen.yil, goruntulenen.ay) && g.tur !== 'deneme') {
         const r = dersRenk(g.ders);
         if (!renkler.includes(r)) renkler.push(r);
       }
@@ -189,7 +193,7 @@ export default function Takvim() {
   }
 
   function denemeGunuMu(gun: number): boolean {
-    return ayGorevleri.some((g) => gunMu(g, gun) && g.tur === 'deneme');
+    return ayGorevleri.some((g) => gunMu(g, gun, goruntulenen.yil, goruntulenen.ay) && g.tur === 'deneme');
   }
 
   // ── Seçili gün ajandası ──
@@ -201,13 +205,13 @@ export default function Takvim() {
   const gunPlanlari = useMemo(() => {
     if (!seciliAyMi) return [];
     return ayGorevleri
-      .filter((g) => gunMu(g, seciliGun))
+      .filter((g) => gunMu(g, seciliGun, goruntulenen.yil, goruntulenen.ay))
       .sort((a, b) => {
         const ta = a.tarih ? a.tarih.toMillis() : 0;
         const tb = b.tarih ? b.tarih.toMillis() : 0;
         return ta - tb;
       });
-  }, [ayGorevleri, seciliGun, seciliAyMi]);
+  }, [ayGorevleri, seciliGun, seciliAyMi, goruntulenen.yil, goruntulenen.ay]);
 
   const planlar = gunPlanlari.filter((g) => g.tur !== 'deneme');
   const planSay = planlar.length;
@@ -398,16 +402,23 @@ export default function Takvim() {
                 )
               )}
 
-              <TouchableOpacity
-                style={styles.planaEkle}
-                onPress={() =>
-                  router.push({ pathname: '/plan-kur', params: { tarih: String(secilenTarih.getTime()) } })
-                }
-                activeOpacity={0.8}
-              >
-                <Ionicons name="add" size={17} color={PRIMARY} />
-                <Text style={styles.planaEkleMetin}>Plana ekle</Text>
-              </TouchableOpacity>
+              {seciliSinav ? (
+                <View style={styles.sinavNot}>
+                  <Ionicons name="information-circle-outline" size={15} color={COLORS.textLight} />
+                  <Text style={styles.sinavNotMetin}>Sınav günü — bu güne plan eklenemez.</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.planaEkle}
+                  onPress={() =>
+                    router.push({ pathname: '/plan-kur', params: { tarih: String(secilenTarih.getTime()) } })
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="add" size={17} color={PRIMARY} />
+                  <Text style={styles.planaEkleMetin}>Plana ekle</Text>
+                </TouchableOpacity>
+              )}
 
               {/* İstediğin zaman (tarihe bağlı olmayan görevler) */}
               {istediginZaman.length > 0 && (
@@ -843,6 +854,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   planaEkleMetin: { fontSize: 13.5, fontWeight: '700', color: PRIMARY },
+  sinavNot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.card,
+    marginTop: 2,
+  },
+  sinavNotMetin: { fontSize: 12.5, fontWeight: '700', color: COLORS.textLight },
   altBaslik: {
     fontSize: 11.5,
     fontWeight: '800',

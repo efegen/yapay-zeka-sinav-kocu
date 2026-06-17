@@ -21,6 +21,7 @@ import { auth } from '../../services/firebaseConfig';
 import { gorevEkle, gunGorevleriniGetir } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
 import { dersRenk } from '../../constants/dersler';
+import { yksSinavGunuMu } from '../../constants/sinav';
 import { GunTaslak, planiTaslaklaraCevir } from '../../utils/planAktar';
 import type { HaftalikPlanVeri } from '../../types/koc';
 
@@ -106,8 +107,13 @@ export function PlaniTakvimeAktarModal({
         };
       });
       setMeta(m);
-      // Varsayılan seçim: tarihi çözülen ve zaten eklenmemiş günler işaretli.
-      setSecili(t.map((x, i) => !!x.tarih && !m[i].zatenVar));
+      // Varsayılan seçim: tarihi çözülen, zaten eklenmemiş ve YKS günü OLMAYAN günler işaretli.
+      setSecili(
+        t.map((x, i) => {
+          if (!x.tarih || m[i].zatenVar) return false;
+          return !yksSinavGunuMu(x.tarih);
+        })
+      );
       setYukleniyor(false);
     })();
 
@@ -121,7 +127,9 @@ export function PlaniTakvimeAktarModal({
   }, [acik, uid]);
 
   function toggle(i: number) {
-    if (!taslaklar[i].tarih) return; // tarihi çözülemeyen gün eklenemez
+    const t = taslaklar[i];
+    // Tarihi çözülemeyen, o gün zaten ekli (kopya) ya da YKS sınav günü olan günler seçilemez.
+    if (!t.tarih || meta[i]?.zatenVar || yksSinavGunuMu(t.tarih)) return;
     setSecili((s) => s.map((v, j) => (j === i ? !v : v)));
   }
 
@@ -227,7 +235,8 @@ export function PlaniTakvimeAktarModal({
                 const renk = dersRenk(t.ders);
                 const m = meta[i] ?? { mevcutSayi: 0, zatenVar: false };
                 const sec = secili[i];
-                const eklenemez = !t.tarih;
+                const sinavGunu = t.tarih ? yksSinavGunuMu(t.tarih) : false;
+                const eklenemez = !t.tarih || m.zatenVar || sinavGunu;
                 return (
                   <TouchableOpacity
                     key={i}
@@ -260,8 +269,10 @@ export function PlaniTakvimeAktarModal({
                         )}
                       </View>
                       {/* uç durum bilgisi */}
-                      {m.zatenVar ? (
-                        <Text style={s.uyari}>Bu görev o gün zaten var — atlanacak</Text>
+                      {sinavGunu ? (
+                        <Text style={s.uyari}>YKS sınav günü — eklenemez</Text>
+                      ) : m.zatenVar ? (
+                        <Text style={s.uyari}>Bu plan o gün zaten ekli — tekrar eklenmez</Text>
                       ) : m.mevcutSayi > 0 ? (
                         <Text style={s.bilgi}>O gün {m.mevcutSayi} görev daha var (çakışmaz)</Text>
                       ) : null}
