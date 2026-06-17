@@ -144,6 +144,8 @@ export default function AiKoc() {
   const [kaynakModal, setKaynakModal] = useState(false);
   const [cekmece, setCekmece] = useState(false);
   const [bekleyenFoto, setBekleyenFoto] = useState<{ base64: string; uri: string } | null>(null);
+  // Tam ekran fotoğraf önizlemesi — sohbetteki/bekleyen foto'ya dokununca açılır.
+  const [onizlemeFoto, setOnizlemeFoto] = useState<string | null>(null);
   const listeRef = useRef<FlatList<Satir>>(null);
   // Yalnızca yeni mesaj eklendiğinde en alta kay. Akordeon adımı açma gibi içerik
   // boyutu değişimlerinde kaymamak için onContentSizeChange bu bayrağı tüketir.
@@ -437,6 +439,7 @@ export default function AiKoc() {
               <Mesaj
                 balon={item.balon}
                 onTekrar={tekrarDene}
+                onFotoAc={setOnizlemeFoto}
                 onKartGuncelle={(i, yeni) => kartiGuncelle(item.balon.id, i, yeni)}
                 onAksiyon={aksiyonYap}
                 onGeriBildirim={(sinyal, aksiyon, adimMetni) =>
@@ -460,7 +463,9 @@ export default function AiKoc() {
       <View style={styles.girisAlani}>
         {bekleyenFoto && (
           <View style={styles.bekleyenSatir}>
-            <Image source={{ uri: bekleyenFoto.uri }} style={styles.bekleyenFotoImg} resizeMode="cover" />
+            <TouchableOpacity onPress={() => setOnizlemeFoto(bekleyenFoto.uri)} activeOpacity={0.8}>
+              <Image source={{ uri: bekleyenFoto.uri }} style={styles.bekleyenFotoImg} resizeMode="cover" />
+            </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={styles.bekleyenBaslik}>Soru fotoğrafı hazır</Text>
               <Text style={styles.bekleyenAlt}>Göndermeden önce not ekleyebilirsin (opsiyonel)</Text>
@@ -537,6 +542,27 @@ export default function AiKoc() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Tam ekran fotoğraf önizlemesi — herhangi bir yere dokununca kapanır */}
+      <Modal
+        visible={!!onizlemeFoto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOnizlemeFoto(null)}
+      >
+        <Pressable style={styles.onizlemeArka} onPress={() => setOnizlemeFoto(null)}>
+          {!!onizlemeFoto && (
+            <Image source={{ uri: onizlemeFoto }} style={styles.onizlemeImg} resizeMode="contain" />
+          )}
+          <TouchableOpacity
+            style={styles.onizlemeKapat}
+            onPress={() => setOnizlemeFoto(null)}
+            hitSlop={10}
+          >
+            <Ionicons name="close" size={26} color="#fff" />
+          </TouchableOpacity>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -544,12 +570,14 @@ export default function AiKoc() {
 function Mesaj({
   balon,
   onTekrar,
+  onFotoAc,
   onKartGuncelle,
   onAksiyon,
   onGeriBildirim,
 }: {
   balon: Balon;
   onTekrar: () => void;
+  onFotoAc: (uri: string) => void;
   onKartGuncelle: (kartIndex: number, yeniKart: Kart) => void;
   onAksiyon: (aksiyon?: string, mesaj?: string) => void;
   onGeriBildirim: (sinyal: KonuSinyali, aksiyon?: 'sor' | 'tekrar', adimMetni?: string) => void;
@@ -576,7 +604,9 @@ function Mesaj({
       <View style={[styles.balonSatir, styles.balonSatirSag]}>
         <View style={[styles.balon, styles.balonBenim, balon.foto && styles.balonFotolu]}>
           {!!balon.foto && (
-            <Image source={{ uri: balon.foto }} style={styles.fotoOnizleme} resizeMode="cover" />
+            <TouchableOpacity onPress={() => onFotoAc(balon.foto!)} activeOpacity={0.85}>
+              <Image source={{ uri: balon.foto }} style={styles.fotoOnizleme} resizeMode="cover" />
+            </TouchableOpacity>
           )}
           {!!balon.metin && (
             <Text style={[styles.balonMetin, styles.balonMetinBenim, balon.foto && styles.balonFotoMetin]}>
@@ -768,6 +798,16 @@ const styles = StyleSheet.create({
   balonFotolu: { padding: 5 },
   fotoOnizleme: { width: 200, height: 140, borderRadius: 14 },
   balonFotoMetin: { marginTop: 6, marginHorizontal: 6, marginBottom: 2, fontSize: 13 },
+
+  // Tam ekran foto önizlemesi
+  onizlemeArka: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center',
+  },
+  onizlemeImg: { width: '100%', height: '100%' },
+  onizlemeKapat: {
+    position: 'absolute', top: 48, right: 20, width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'center', alignItems: 'center',
+  },
 
   // Hata kartı
   hataKart: {
