@@ -9,6 +9,8 @@ import {
   TextInput,
   ActivityIndicator,
   Animated,
+  Platform,
+  Share,
 } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,18 +21,24 @@ import {
   updatePassword,
   reauthenticateWithCredential,
   EmailAuthProvider,
+  verifyBeforeUpdateEmail,
   deleteUser,
 } from 'firebase/auth';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../../services/firebaseConfig';
 import { cikisYap } from '../../services/authService';
-import { manuelSyncHedefNet, denemeleriGetir } from '../../services/firestoreService';
+import {
+  manuelSyncHedefNet,
+  denemeleriGetir,
+  profilGuncelle,
+  kullaniciVerisiniTopla,
+} from '../../services/firestoreService';
 import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { bildir } from '../../utils/bildirim';
 
-type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis';
+type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis' | 'hedefler' | 'eposta';
 
 const SEP = 'rgba(60,60,67,0.1)';
 const ACCENT_LIGHT = '#FCE7F3';
@@ -68,6 +76,12 @@ export default function Profil() {
   const [silSifre, setSilSifre] = useState('');
   const [silHata, setSilHata] = useState('');
 
+  const [yeniEposta, setYeniEposta] = useState('');
+  const [epostaSifre, setEpostaSifre] = useState('');
+  const [epostaHata, setEpostaHata] = useState('');
+  const [hedefSoru, setHedefSoru] = useState(0);
+  const [hedefGun, setHedefGun] = useState(1);
+
   const [trackWidth, setTrackWidth] = useState(0);
   const tabAnim = useRef(new Animated.Value(0)).current;
   const contentOpacity = useRef(new Animated.Value(1)).current;
@@ -100,6 +114,90 @@ export default function Profil() {
     setAktifModal(null);
     setMevcutSifre(''); setYeniSifre(''); setYeniSifreTekrar(''); setSifreHata('');
     setSilSifre(''); setSilHata('');
+    setYeniEposta(''); setEpostaSifre(''); setEpostaHata('');
+  }
+
+  function hedeflerAc() {
+    setHedefSoru(profil?.gunlukSoruHedefi ?? 0);
+    setHedefGun(profil?.haftaCalismaSayisi ?? 1);
+    setAktifModal('hedefler');
+  }
+
+  async function hedefleriKaydet() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setIslemYukleniyor(true);
+    try {
+      await profilGuncelle(uid, { gunlukSoruHedefi: hedefSoru, haftaCalismaSayisi: hedefGun });
+      modalKapat();
+      bildir('Kaydedildi', 'Çalışma hedeflerin güncellendi.');
+    } catch (e) {
+      console.error('[Profil] hedef kaydetme hatası:', e);
+      bildir('Hata', 'Hedefler kaydedilemedi, tekrar dene.');
+    } finally {
+      setIslemYukleniyor(false);
+    }
+  }
+
+  async function epostaDegistir() {
+    const yeni = yeniEposta.trim();
+    if (!yeni.includes('@') || !yeni.includes('.')) { setEpostaHata('Geçerli bir e-posta gir.'); return; }
+    if (!epostaSifre) { setEpostaHata('Mevcut şifreni gir.'); return; }
+    const kullanici = auth.currentUser;
+    if (!kullanici?.email) return;
+    setIslemYukleniyor(true);
+    try {
+      const kred = EmailAuthProvider.credential(kullanici.email, epostaSifre);
+      await reauthenticateWithCredential(kullanici, kred);
+      // Yeni adrese doğrulama bağlantısı gönderilir; öğrenci onaylayınca e-posta güncellenir.
+      await verifyBeforeUpdateEmail(kullanici, yeni);
+      modalKapat();
+      bildir('Doğrulama gönderildi', `${yeni} adresine bir doğrulama bağlantısı gönderdik. Bağlantıya tıklayınca e-postan güncellenecek.`);
+    } catch (e: any) {
+      const kod = e?.code;
+      setEpostaHata(
+        kod === 'auth/invalid-email' ? 'Geçersiz e-posta adresi.'
+        : kod === 'auth/email-already-in-use' ? 'Bu e-posta zaten kullanımda.'
+        : kod === 'auth/wrong-password' ? 'Mevcut şifre hatalı.'
+        : 'Şifre hatalı ya da bir sorun oluştu.'
+      );
+    } finally {
+      setIslemYukleniyor(false);
+    }
+  }
+
+  async function veriIndir() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setIslemYukleniyor(true);
+    try {
+      const veri = await kullaniciVerisiniTopla(uid);
+      const json = JSON.stringify(veri, null, 2);
+      if (Platform.OS === 'web') {
+        // Web'de tarayıcıdan JSON dosyası indir.
+        const g = globalThis as any;
+        const blob = new g.Blob([json], { type: 'application/json' });
+        const url = g.URL.createObjectURL(blob);
+        const a = g.document.createElement('a');
+        a.href = url;
+        a.download = `yzdsk-verilerim-${new Date().toISOString().slice(0, 10)}.json`;
+        g.document.body.appendChild(a);
+        a.click();
+        a.remove();
+        g.URL.revokeObjectURL(url);
+        modalKapat();
+        bildir('İndirildi', 'Tüm verilerin JSON dosyası olarak indirildi.');
+      } else {
+        // Native'de paylaşım sayfası (kaydet / gönder).
+        await Share.share({ title: 'YZDSK verilerim', message: json });
+        modalKapat();
+      }
+    } catch (e) {
+      console.error('[Profil] veri dışa aktarma hatası:', e);
+      bildir('Hata', 'Veriler hazırlanamadı, lütfen tekrar dene.');
+    } finally {
+      setIslemYukleniyor(false);
+    }
   }
 
   async function sifreDegistir() {
@@ -177,9 +275,6 @@ export default function Profil() {
                 {profil?.isim?.charAt(0).toUpperCase() ?? '?'}
               </Text>
             </LinearGradient>
-            <View style={s.editRozet}>
-              <Ionicons name="pencil-outline" size={11} color={COLORS.primary} />
-            </View>
           </View>
           <Text style={s.isim}>{profil?.isim ?? '—'}</Text>
           <Text style={s.altyazi}>
@@ -234,7 +329,9 @@ export default function Profil() {
             <AyarlarSekme
               profil={profil}
               onKocHafiza={() => router.push('/koc-hafiza' as any)}
+              onHedefler={hedeflerAc}
               onSifre={() => setAktifModal('sifre')}
+              onEposta={() => setAktifModal('eposta')}
               onKvkk={() => setAktifModal('kvkk')}
               onCikis={() => setAktifModal('cikis')}
               onHesapSil={() => setAktifModal('hesapSil')}
@@ -276,15 +373,18 @@ export default function Profil() {
           <View style={s.modalBilgi}>
             <Ionicons name="document-text-outline" size={32} color={COLORS.primary} />
             <Text style={s.modalBilgiMetin}>
-              KVKK kapsamında kişisel verilerini talep edebilirsin. İşlem tamamlandığında e-posta adresine iletilecek.
+              KVKK kapsamında tüm kişisel verin (profil, denemeler, görevler, yanlış defteri, koç hafızası)
+              tek bir JSON dosyası olarak {Platform.OS === 'web' ? 'cihazına indirilir' : 'paylaşılır'}.
             </Text>
           </View>
           <View style={s.btnRow}>
             <TouchableOpacity style={s.iptalBtn} onPress={modalKapat} activeOpacity={0.8}>
               <Text style={s.iptalMetin}>İptal</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.onayBtn} onPress={modalKapat} activeOpacity={0.8}>
-              <Text style={s.onayMetin}>Talep Gönder</Text>
+            <TouchableOpacity style={s.onayBtn} onPress={veriIndir} activeOpacity={0.8} disabled={islemYukleniyor}>
+              {islemYukleniyor
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Text style={s.onayMetin}>{Platform.OS === 'web' ? 'İndir' : 'Dışa Aktar'}</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -328,6 +428,67 @@ export default function Profil() {
               {islemYukleniyor
                 ? <ActivityIndicator size="small" color={COLORS.white} />
                 : <Text style={s.onayMetin}>Hesabı Sil</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Çalışma Hedefleri modal ── */}
+      <Modal visible={aktifModal === 'hedefler'} transparent animationType="slide" statusBarTranslucent>
+        <Pressable style={s.overlay} onPress={modalKapat} />
+        <View style={s.altSheet}>
+          <View style={s.tutamac} />
+          <Text style={s.sheetBaslik}>Çalışma Hedefleri</Text>
+          <Text style={s.hedefEtiket}>Günlük soru hedefi</Text>
+          <Stepper deger={hedefSoru} min={0} max={500} adim={5} birim="soru" onChange={setHedefSoru} />
+          <Text style={[s.hedefEtiket, { marginTop: 16 }]}>Haftalık çalışma günü</Text>
+          <Stepper deger={hedefGun} min={1} max={7} adim={1} birim="gün" onChange={setHedefGun} />
+          <View style={[s.btnRow, { marginTop: 22 }]}>
+            <TouchableOpacity style={s.iptalBtn} onPress={modalKapat} activeOpacity={0.8}>
+              <Text style={s.iptalMetin}>İptal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.onayBtn} onPress={hedefleriKaydet} activeOpacity={0.8} disabled={islemYukleniyor}>
+              {islemYukleniyor
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Text style={s.onayMetin}>Kaydet</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── E-posta değiştir modal ── */}
+      <Modal visible={aktifModal === 'eposta'} transparent animationType="slide" statusBarTranslucent>
+        <Pressable style={s.overlay} onPress={modalKapat} />
+        <View style={s.altSheet}>
+          <View style={s.tutamac} />
+          <Text style={s.sheetBaslik}>E-postamı Değiştir</Text>
+          <View style={s.sifreAlani}>
+            <Text style={s.sifreEtiket}>Yeni E-posta</Text>
+            <View style={s.sifreInputSarici}>
+              <TextInput
+                style={s.sifreInput}
+                value={yeniEposta}
+                onChangeText={setYeniEposta}
+                placeholder="ornek@mail.com"
+                placeholderTextColor={COLORS.textLight}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+            </View>
+          </View>
+          <SifreGiris etiket="Mevcut Şifre" deger={epostaSifre} onChange={setEpostaSifre} />
+          {epostaHata ? <Text style={s.hataMetin}>{epostaHata}</Text> : null}
+          <Text style={s.epostaNot}>
+            Yeni adresine bir doğrulama bağlantısı gönderilir; bağlantıya tıklayınca e-postan güncellenir.
+          </Text>
+          <View style={s.btnRow}>
+            <TouchableOpacity style={s.iptalBtn} onPress={modalKapat} activeOpacity={0.8}>
+              <Text style={s.iptalMetin}>İptal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.onayBtn} onPress={epostaDegistir} activeOpacity={0.8} disabled={islemYukleniyor}>
+              {islemYukleniyor
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Text style={s.onayMetin}>Doğrulama Gönder</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -457,11 +618,13 @@ function GenelSekme({
 // ─── Ayarlar sekmesi ─────────────────────────────────────────────────────────
 
 function AyarlarSekme({
-  profil, onKocHafiza, onSifre, onKvkk, onCikis, onHesapSil,
+  profil, onKocHafiza, onHedefler, onSifre, onEposta, onKvkk, onCikis, onHesapSil,
 }: {
   profil: ProfilType | null;
   onKocHafiza: () => void;
+  onHedefler: () => void;
   onSifre: () => void;
+  onEposta: () => void;
   onKvkk: () => void;
   onCikis: () => void;
   onHesapSil: () => void;
@@ -469,7 +632,7 @@ function AyarlarSekme({
   return (
     <View>
       <Group header="Tercihler">
-        <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron />
+        <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron onPress={onHedefler} />
         <Row icon="sparkles-outline" etiket="Koç Hafızam" chevron onPress={onKocHafiza} son />
       </Group>
 
@@ -480,6 +643,7 @@ function AyarlarSekme({
           etiket="E-posta"
           deger={profil?.email ?? '—'}
           chevron
+          onPress={onEposta}
         />
         <Row icon="download-outline" etiket="Verilerimi İndir (KVKK)" chevron onPress={onKvkk} son />
       </Group>
@@ -693,6 +857,40 @@ function SifreGiris({
   );
 }
 
+function Stepper({
+  deger, min, max, adim, birim, onChange,
+}: {
+  deger: number;
+  min: number;
+  max: number;
+  adim: number;
+  birim: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <View style={s.stepperRow}>
+      <TouchableOpacity
+        style={s.stepperBtn}
+        onPress={() => onChange(Math.max(min, deger - adim))}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="remove" size={20} color={COLORS.text} />
+      </TouchableOpacity>
+      <View style={s.stepperOrta}>
+        <Text style={s.stepperSayi}>{deger}</Text>
+        <Text style={s.stepperBirim}>{birim}</Text>
+      </View>
+      <TouchableOpacity
+        style={[s.stepperBtn, s.stepperArti]}
+        onPress={() => onChange(Math.min(max, deger + adim))}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add" size={20} color="#fff" />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // ─── Stiller ─────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
@@ -870,6 +1068,22 @@ const s = StyleSheet.create({
 
   sifreAlani: { marginBottom: 12, alignSelf: 'stretch' },
   sifreEtiket: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 6 },
+  epostaNot: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 17, marginBottom: 14, marginTop: -2 },
+
+  // Çalışma hedefleri stepper
+  hedefEtiket: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 10 },
+  stepperRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.background, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 5,
+  },
+  stepperBtn: {
+    width: 46, height: 46, borderRadius: 11, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.cardBorder,
+  },
+  stepperArti: { backgroundColor: COLORS.primary, borderWidth: 0 },
+  stepperOrta: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
+  stepperSayi: { fontSize: 24, fontWeight: '800', color: COLORS.text, fontVariant: ['tabular-nums'] },
+  stepperBirim: { fontSize: 13, fontWeight: '700', color: COLORS.textLight },
   sifreInputSarici: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.background, borderRadius: 12,

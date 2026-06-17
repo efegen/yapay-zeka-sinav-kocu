@@ -259,44 +259,6 @@ export default function AnaSayfa() {
         </View>
       </Yukselen>
 
-      {/* ─── İkili satır: Seri · Günlük soru ─── */}
-      <Yukselen gecikme={120}>
-        <View style={styles.ikiliRow}>
-          {/* Çalışma serisi — veri yok (dürüst boş durum) */}
-          <View style={[styles.kart, styles.seriKart]}>
-            <View style={styles.kartUstSatir}>
-              <View style={[styles.ikonKutu, { backgroundColor: '#FFEFD6' }]}>
-                <Ionicons name="flame" size={20} color={COLORS.amber} />
-              </View>
-              <YakindaPill />
-            </View>
-            <Text style={styles.seriSayi}>—</Text>
-            <Text style={styles.mikroEtiket}>çalışma serisi</Text>
-            <Text style={styles.kartNot}>Seri takibi yakında</Text>
-          </View>
-
-          {/* Günlük soru — hedef gerçek, çözüm takibi yok */}
-          <View style={[styles.kart, styles.soruKart]}>
-            <View style={styles.kartUstSatir}>
-              <View style={[styles.ikonKutu, { backgroundColor: COLORS.primaryLight }]}>
-                <Ionicons name="create-outline" size={19} color={COLORS.primary} />
-              </View>
-            </View>
-            <View style={styles.halkaSarici}>
-              <View style={styles.halkaTrack} />
-              <View style={styles.halkaMerkez}>
-                <Text style={styles.halkaSayi}>{profil?.gunlukSoruHedefi ?? '—'}</Text>
-                <Text style={styles.halkaAlt}>hedef</Text>
-              </View>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={styles.mikroEtiket}>Günlük soru</Text>
-              <Text style={styles.kartNot}>Çözüm takibi yakında</Text>
-            </View>
-          </View>
-        </View>
-      </Yukselen>
-
       {/* ─── Hedef netlerin (gerçek veri) ─── */}
       <Yukselen gecikme={200}>
         <View style={styles.kart}>
@@ -561,10 +523,7 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 2,
   },
-  kartUstSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  ikonKutu: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   kartBaslik: { fontSize: 13.5, fontWeight: '700', color: COLORS.text },
-  mikroEtiket: { fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', color: COLORS.textSecondary },
   kartNot: { fontSize: 11, fontWeight: '500', color: COLORS.textLight, marginTop: 4 },
   satirSol: { flexDirection: 'row', alignItems: 'center', gap: 7 },
 
@@ -598,19 +557,6 @@ const styles = StyleSheet.create({
   heroAltMetin: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
   heroRay: { height: 6, borderRadius: 99, backgroundColor: 'rgba(0,0,0,0.22)', overflow: 'hidden' },
   heroDolgu: { height: '100%', borderRadius: 99, backgroundColor: '#fff' },
-
-  // İkili satır
-  ikiliRow: { flexDirection: 'row', gap: 10 },
-  seriKart: { flex: 1, backgroundColor: '#FFF9F0', borderColor: '#F6E6CF' },
-  soruKart: { flex: 1 },
-  seriSayi: { fontSize: 30, fontWeight: '800', color: COLORS.text, marginTop: 11 },
-
-  // Günlük soru halkası (boş track)
-  halkaSarici: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
-  halkaTrack: { width: 88, height: 88, borderRadius: 44, borderWidth: 10, borderColor: '#E9E5FB' },
-  halkaMerkez: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  halkaSayi: { fontSize: 26, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
-  halkaAlt: { fontSize: 10.5, fontWeight: '700', color: COLORS.textLight, marginTop: -2 },
 
   // Hedef netler
   netBaslikSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },

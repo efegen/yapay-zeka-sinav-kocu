@@ -500,3 +500,42 @@ export const yanlisGuncelle = async (
 export const yanlisSil = async (uid: string, id: string): Promise<void> => {
   await deleteDoc(doc(db, 'users', uid, 'yanlislar', id));
 };
+
+// ─────────────────────────────────────────────
+// Profil güncelleme + KVKK veri dışa aktarımı
+// ─────────────────────────────────────────────
+
+/** Profil dokümanının verilen alanlarını günceller (undefined alanlar ayıklanır). */
+export const profilGuncelle = async (
+  uid: string,
+  patch: Record<string, unknown>
+): Promise<void> => {
+  await updateDoc(doc(db, 'users', uid), temizle(patch));
+};
+
+/** KVKK: kullanıcının tüm verisini tek bir nesnede toplar (dışa aktarım için). */
+export const kullaniciVerisiniTopla = async (uid: string): Promise<Record<string, unknown>> => {
+  const [profilSnap, denemeSnap, gorevSnap, yanlisSnap, hafizaSnap] = await Promise.all([
+    getDoc(doc(db, 'users', uid)),
+    getDocs(collection(db, 'users', uid, 'denemeler')),
+    getDocs(collection(db, 'users', uid, 'gorevler')),
+    getDocs(collection(db, 'users', uid, 'yanlislar')),
+    getDoc(doc(db, 'users', uid, 'koc', 'hafiza')),
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const belgeler = (snap: any) => snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+  // Yanlış görselleri (base64) dosyayı şişirmesin diye yalnızca "var mı" olarak yazılır.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const yanlislar = yanlisSnap.docs.map((d: any) => {
+    const { gorsel, ...digerleri } = d.data();
+    return { id: d.id, ...digerleri, gorselVar: !!gorsel };
+  });
+  return {
+    disaAktarmaTarihi: new Date().toISOString(),
+    profil: profilSnap.exists() ? profilSnap.data() : null,
+    denemeler: belgeler(denemeSnap),
+    gorevler: belgeler(gorevSnap),
+    yanlislar,
+    kocHafiza: hafizaSnap.exists() ? hafizaSnap.data() : null,
+  };
+};
