@@ -20,7 +20,7 @@ export interface Profil {
   netFetchStatus?: string;
   netFetchRetryCount?: number;
   toplamSoru?: number;
-  toplamOdakSaat?: number;
+  toplamOdakSaniye?: number; // biriken toplam odak süresi (saniye)
   uyelikTarihi?: string;
 }
 

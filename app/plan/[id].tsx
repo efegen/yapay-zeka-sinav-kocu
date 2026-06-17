@@ -9,10 +9,12 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { auth } from '../../services/firebaseConfig';
 import {
   Gorev,
@@ -20,10 +22,13 @@ import {
   AdimTip,
   gorevGetir,
   gorevTamamla,
+  gorevSil,
   adimlariGuncelle,
+  calismaIstatistikEkle,
 } from '../../services/firestoreService';
 import { COLORS } from '../../constants/colors';
 import { dersRenk } from '../../constants/dersler';
+import { bildir } from '../../utils/bildirim';
 import { Ring } from '../../components/koc/Ring';
 
 function ikiHane(n: number): string {
@@ -37,9 +42,14 @@ function ssFormat(saniye: number): string {
   return `${dk}:${ikiHane(sn)}`;
 }
 
-// Adım meta metni — tipe göre ayrık. Mola'nın "net"i YOK.
+// ── Sayaç oturumu: ekran terk edilse / yeniden açılsa da ilerleme korunur ──
+// AsyncStorage'da görev başına saklanır; `damga` ile geçen süre duvar-saatinden hesaplanır.
+type Oturum = { adimIndex: number; gecen: number; calisiyor: boolean };
+const oturumAnahtari = (id: string) => `plan-timer:${id}`;
+
+// Adım meta metni — tipe göre ayrık.
 function adimMetaMetni(a: Adim): string {
-  if (a.tip === 'soru') return `${a.dk} dk · ${a.soru ?? 0} soru → net`;
+  if (a.tip === 'soru') return a.soru ? `${a.dk} dk · ${a.soru} soru` : `${a.dk} dk · soru çözümü`;
   if (a.tip === 'mola') return `${a.dk} dk · dinlen, soru yok`;
   return `${a.dk} dk · konu tekrarı`;
 }
@@ -69,6 +79,10 @@ export default function PlanDetay() {
   // Adım ekle/düzenle modalı
   const [adimModal, setAdimModal] = useState<{ index: number | null } | null>(null);
 
+  // Saklanan sayaç oturumu (adimBasla "devam" için okur) + tek-sefer geri yükleme kilidi.
+  const oturumRef = useRef<Oturum | null>(null);
+  const oturumYuklendi = useRef(false);
+
   const renk = dersRenk(gorev?.ders);
 
   // ── Yükle ──
@@ -91,6 +105,49 @@ export default function PlanDetay() {
       iptal = true;
     };
   }, [uid, id]);
+
+  // ── Sayaç oturumunu yaz/sil — tüm geçişlerin tek yazıcısı. ref'i de günceller. ──
+  const oturumYaz = useCallback(
+    (k: Oturum | null) => {
+      oturumRef.current = k;
+      if (!id) return;
+      if (!k) {
+        AsyncStorage.removeItem(oturumAnahtari(id)).catch(() => {});
+      } else {
+        AsyncStorage.setItem(
+          oturumAnahtari(id),
+          JSON.stringify({ ...k, damga: Date.now() })
+        ).catch(() => {});
+      }
+    },
+    [id]
+  );
+
+  // ── Geri yükle: ekran yeniden açıldığında devam eden sayacı duvar-saatiyle sürdür ──
+  useEffect(() => {
+    if (yukleniyor || !id || oturumYuklendi.current) return;
+    oturumYuklendi.current = true;
+    (async () => {
+      try {
+        const ham = await AsyncStorage.getItem(oturumAnahtari(id));
+        if (!ham) return;
+        const k = JSON.parse(ham) as Oturum & { damga: number };
+        const adim = adimlar[k.adimIndex];
+        // Adım yoksa ya da bu arada bittiyse oturum geçersiz — temizle.
+        if (!adim || adim.done) {
+          AsyncStorage.removeItem(oturumAnahtari(id)).catch(() => {});
+          return;
+        }
+        const ekle = k.calisiyor ? Math.max(0, Math.floor((Date.now() - k.damga) / 1000)) : 0;
+        oturumRef.current = { adimIndex: k.adimIndex, gecen: k.gecen, calisiyor: k.calisiyor };
+        setAktifAdim(k.adimIndex);
+        setGecen(k.gecen + ekle);
+        setDuraklatildi(!k.calisiyor);
+      } catch (err) {
+        console.error('[PlanDetay] oturum geri yükleme hatası:', err);
+      }
+    })();
+  }, [yukleniyor, id, adimlar]);
 
   // ── Sayaç tik ──
   useEffect(() => {
@@ -124,19 +181,78 @@ export default function PlanDetay() {
 
   // ── Adım işlemleri ──
   function adimBasla(i: number) {
+    // Aynı adıma ait duraklatılmış oturum varsa kaldığı yerden devam et.
+    const o = oturumRef.current;
+    const baslaGecen = o && o.adimIndex === i ? o.gecen : 0;
     setAktifAdim(i);
-    setGecen(0);
-    setDuraklatildi(false);
+    setGecen(baslaGecen);
+    // Sayaç ekranı DURAKLATILMIŞ açılır — sayım, oradaki "Başlat" butonuna basınca başlar.
+    setDuraklatildi(true);
     setMod('liste');
+    oturumYaz({ adimIndex: i, gecen: baslaGecen, calisiyor: false });
+  }
+
+  function duraklatToggle() {
+    const yeni = !duraklatildi;
+    setDuraklatildi(yeni);
+    if (aktifAdim !== null) oturumYaz({ adimIndex: aktifAdim, gecen, calisiyor: !yeni });
   }
 
   function adimBitir(i: number) {
+    const adim = adimlar[i];
+    // "Toplam Emek" sayaçları: adım tamamlanırken biriktir.
+    // Süre olarak GERÇEKTEN geçen `gecen` yazılır — erken "Bitir"de planlanan
+    // tüm süre değil, sayaçta geçen kadarı sayılır. Mola odak sayılmaz; soru
+    // sayısı yalnızca soru adımından gelir.
+    if (uid && adim && !adim.done) {
+      const odakSaniye = adim.tip === 'mola' ? 0 : Math.max(0, gecen);
+      const soru = adim.tip === 'soru' ? adim.soru ?? 0 : 0;
+      if (odakSaniye > 0 || soru > 0) {
+        calismaIstatistikEkle(uid, { odakSaniye, soru }).catch((err) =>
+          console.error('[PlanDetay] istatistik yazma hatası:', err)
+        );
+      }
+    }
     const yeni = adimlar.map((a, j) => (j === i ? { ...a, done: true } : a));
     setAktifAdim(null);
     setGecen(0);
     setDuraklatildi(false);
+    oturumYaz(null);
     kaydet(yeni);
   }
+
+  // ── Bağlam-farkında geri: düzenle→liste, sayaç→liste(duraklat, ilerleme korunur), liste→çık ──
+  const geriGit = useCallback(() => {
+    if (adimModal) {
+      setAdimModal(null);
+      return;
+    }
+    if (mod === 'duzenle') {
+      setMod('liste');
+      return;
+    }
+    if (aktifAdim !== null) {
+      oturumYaz({ adimIndex: aktifAdim, gecen, calisiyor: false });
+      setAktifAdim(null);
+      setDuraklatildi(false);
+      return;
+    }
+    router.back();
+  }, [adimModal, mod, aktifAdim, gecen, oturumYaz, router]);
+
+  // Android donanım geri tuşu — aynı bağlam-farkında davranış.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (adimModal || mod === 'duzenle' || aktifAdim !== null) {
+          geriGit();
+          return true; // varsayılan pop'u engelle
+        }
+        return false; // liste modunda: normal geri (router.back)
+      });
+      return () => sub.remove();
+    }, [adimModal, mod, aktifAdim, geriGit])
+  );
 
   function tasi(i: number, yon: -1 | 1) {
     const j = i + yon;
@@ -159,6 +275,26 @@ export default function PlanDetay() {
     setAdimModal(null);
   }
 
+  // ── Planı (görevi) tamamen sil — onaylı, geri alınamaz ──
+  function planiSil() {
+    if (!uid || !id) return;
+    bildir('Planı sil', `"${gorev?.baslik ?? 'Bu plan'}" takvimden silinsin mi? Bu işlem geri alınamaz.`, [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await gorevSil(uid, id);
+            router.back();
+          } catch (err) {
+            console.error('[PlanDetay] plan silme hatası:', err);
+          }
+        },
+      },
+    ]);
+  }
+
   // ── Tek alt eylem: adımsız (hızlı eklenen) görevi doğrudan tamamla ──
   async function goreviTamamla() {
     if (!uid || !id) return;
@@ -178,6 +314,10 @@ export default function PlanDetay() {
   const hepBitti = adimlar.length > 0 && bitenSay === adimlar.length;
   // Adımsız görevlerde yedek: doğrudan işaretlenmiş tamamlanma.
   const tamamMi = hepBitti || (adimlar.length === 0 && !!gorev?.tamamlandi);
+
+  // Sırada bekleyen adımda yarım kalmış (duraklatılmış) bir oturum var mı?
+  const devamOturumu =
+    oturumRef.current && oturumRef.current.adimIndex === siradaIndex ? oturumRef.current : null;
 
   // ── Render durumları ──
   if (yukleniyor) {
@@ -205,13 +345,19 @@ export default function PlanDetay() {
     <View style={styles.ekran}>
       {/* ─── Başlık ─── */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.ikonBtn} onPress={() => router.back()} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.ikonBtn} onPress={geriGit} activeOpacity={0.8}>
           <Ionicons name="chevron-back" size={18} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerBaslik}>
           {mod === 'duzenle' ? 'Adımları düzenle' : 'Plan Detayı'}
         </Text>
         <View style={styles.headerSag}>
+          {/* Planı sil — sayaç aktifken gizli (kazara dokunmayı önle); tamamlanmışta da silinebilir. */}
+          {!sayacAktif && (
+            <TouchableOpacity style={styles.ikonBtn} onPress={planiSil} activeOpacity={0.85}>
+              <Ionicons name="trash-outline" size={16} color={COLORS.error} />
+            </TouchableOpacity>
+          )}
           {/* Tamamlanmış görevde düzenle gizli — başlık ortada kalsın diye 36px boşluk. */}
           {sayacAktif || tamamMi ? null : mod === 'duzenle' ? (
             <TouchableOpacity style={styles.bittiBtn} onPress={() => setMod('liste')} activeOpacity={0.85}>
@@ -233,7 +379,7 @@ export default function PlanDetay() {
             aktifAdim={aktifAdim!}
             gecen={gecen}
             duraklatildi={duraklatildi}
-            onDuraklat={() => setDuraklatildi((d) => !d)}
+            onDuraklat={duraklatToggle}
             onBitir={() => adimBitir(aktifAdim!)}
             onSiradakiBasla={adimBasla}
           />
@@ -258,6 +404,7 @@ export default function PlanDetay() {
             siradaIndex={siradaIndex}
             hepBitti={hepBitti}
             tamamMi={tamamMi}
+            devamOturumu={devamOturumu}
             onBasla={adimBasla}
             onEkle={() => setAdimModal({ index: null })}
           />
@@ -281,7 +428,9 @@ export default function PlanDetay() {
                 style={styles.baslatBtn}
               >
                 <Ionicons name="play" size={19} color="#fff" />
-                <Text style={styles.baslatMetin}>Sıradaki adımı başlat</Text>
+                <Text style={styles.baslatMetin}>
+                  {devamOturumu ? 'Adıma devam et' : 'Sıradaki adımı başlat'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           ) : (
@@ -347,6 +496,7 @@ function ListeGorunum({
   siradaIndex,
   hepBitti,
   tamamMi,
+  devamOturumu,
   onBasla,
   onEkle,
 }: {
@@ -358,6 +508,7 @@ function ListeGorunum({
   siradaIndex: number;
   hepBitti: boolean;
   tamamMi: boolean;
+  devamOturumu: Oturum | null;
   onBasla: (i: number) => void;
   onEkle: () => void;
 }) {
@@ -403,6 +554,8 @@ function ListeGorunum({
         )}
         {adimlar.map((a, i) => {
           const next = i === siradaIndex;
+          const devamKalan =
+            next && devamOturumu ? Math.max(0, (a.dk || 0) * 60 - devamOturumu.gecen) : null;
           const ikon = adimTipIkon(a.tip);
           const ikonRenk = a.done ? COLORS.textLight : a.tip === 'mola' ? COLORS.textSecondary : renk;
           return (
@@ -447,11 +600,23 @@ function ListeGorunum({
                   >
                     {adimMetaMetni(a)}
                   </Text>
+                  {devamKalan != null && (
+                    <Text style={[styles.devamRozet, { color: renk }]}>
+                      · {ssFormat(devamKalan)} kaldı
+                    </Text>
+                  )}
                 </View>
               </View>
 
-              {/* sağ eylem: yalnızca sıradaki dolu Başla; diğer bitmemişler çizgili; biten yok */}
-              {!a.done && <BaslaBtn solid={next} renk={renk} onPress={() => onBasla(i)} />}
+              {/* sağ eylem: yalnızca sıradaki dolu Başla/Devam; diğer bitmemişler çizgili; biten yok */}
+              {!a.done && (
+                <BaslaBtn
+                  solid={next}
+                  renk={renk}
+                  etiket={devamKalan != null ? 'Devam' : 'Başla'}
+                  onPress={() => onBasla(i)}
+                />
+              )}
             </View>
           );
         })}
@@ -470,7 +635,17 @@ function ListeGorunum({
   );
 }
 
-function BaslaBtn({ solid, renk, onPress }: { solid: boolean; renk: string; onPress: () => void }) {
+function BaslaBtn({
+  solid,
+  renk,
+  etiket = 'Başla',
+  onPress,
+}: {
+  solid: boolean;
+  renk: string;
+  etiket?: string;
+  onPress: () => void;
+}) {
   if (solid) {
     return (
       <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
@@ -481,7 +656,7 @@ function BaslaBtn({ solid, renk, onPress }: { solid: boolean; renk: string; onPr
           style={styles.baslaSolid}
         >
           <Ionicons name="play" size={13} color="#fff" />
-          <Text style={styles.baslaSolidMetin}>Başla</Text>
+          <Text style={styles.baslaSolidMetin}>{etiket}</Text>
         </LinearGradient>
       </TouchableOpacity>
     );
@@ -489,7 +664,7 @@ function BaslaBtn({ solid, renk, onPress }: { solid: boolean; renk: string; onPr
   return (
     <TouchableOpacity style={styles.baslaSoft} onPress={onPress} activeOpacity={0.85}>
       <Ionicons name="play" size={13} color={COLORS.primary} />
-      <Text style={styles.baslaSoftMetin}>Başla</Text>
+      <Text style={styles.baslaSoftMetin}>{etiket}</Text>
     </TouchableOpacity>
   );
 }
@@ -582,7 +757,7 @@ function DuzenleGorunum({
                 <Text style={styles.duzenleAd} numberOfLines={1}>{a.ad}</Text>
                 {soru && (
                   <Text style={[styles.duzenleAlt, { color: renk }]}>
-                    {a.soru ?? 0} soru · netine işlenir
+                    {a.soru ?? 0} soru
                   </Text>
                 )}
               </TouchableOpacity>
@@ -641,6 +816,10 @@ function SayacGorunum({
   const bitenler = adimlar.filter((x) => x.done);
   const siradaki = adimlar.findIndex((x, i) => i !== aktifAdim && !x.done);
 
+  // Henüz hiç sayılmadıysa "Başlat", yarıda duraklatıldıysa "Devam et".
+  const henuzBaslamadi = duraklatildi && gecen === 0;
+  const durumMetni = duraklatildi ? (henuzBaslamadi ? 'HAZIR' : 'DURAKLATILDI') : 'ÇALIŞILIYOR';
+
   return (
     <>
       {/* aktif sayaç kartı */}
@@ -648,7 +827,7 @@ function SayacGorunum({
         <View style={styles.sayacUstSatir}>
           <View style={[styles.heroNokta, { backgroundColor: renk }]} />
           <Text style={[styles.sayacUst, { color: renk }]}>
-            ADIM {aktifAdim + 1}/{adimlar.length} · ÇALIŞILIYOR
+            ADIM {aktifAdim + 1}/{adimlar.length} · {durumMetni}
           </Text>
         </View>
         <Text style={styles.sayacAd}>{a?.ad}</Text>
@@ -658,23 +837,45 @@ function SayacGorunum({
           <Text style={styles.sayacHedef}>{a?.dk} dk hedef · kaldı</Text>
         </Ring>
 
-        <View style={styles.sayacButonlar}>
-          <TouchableOpacity style={styles.duraklatBtn} onPress={onDuraklat} activeOpacity={0.85}>
-            <Ionicons name={duraklatildi ? 'play' : 'pause'} size={17} color={COLORS.textSecondary} />
-            <Text style={styles.duraklatMetin}>{duraklatildi ? 'Devam' : 'Duraklat'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onBitir} activeOpacity={0.85} style={{ flex: 1 }}>
-            <LinearGradient
-              colors={[COLORS.primary, COLORS.accent]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.bitirBtn}
-            >
-              <Ionicons name="checkmark" size={17} color="#fff" />
-              <Text style={styles.bitirMetin}>Adımı bitir</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+        {duraklatildi ? (
+          /* Duraklatılmış/yeni açılmış: birincil eylem BAŞLAT — sayım buradan başlar. */
+          <View style={styles.sayacButonlar}>
+            <TouchableOpacity style={styles.duraklatBtn} onPress={onBitir} activeOpacity={0.85}>
+              <Ionicons name="checkmark" size={17} color={COLORS.textSecondary} />
+              <Text style={styles.duraklatMetin}>Bitir</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onDuraklat} activeOpacity={0.85} style={{ flex: 1 }}>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.bitirBtn}
+              >
+                <Ionicons name="play" size={17} color="#fff" />
+                <Text style={styles.bitirMetin}>{henuzBaslamadi ? 'Başlat' : 'Devam et'}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          /* Çalışırken: birincil eylem ADIMI BİTİR, ikincil DURAKLAT. */
+          <View style={styles.sayacButonlar}>
+            <TouchableOpacity style={styles.duraklatBtn} onPress={onDuraklat} activeOpacity={0.85}>
+              <Ionicons name="pause" size={17} color={COLORS.textSecondary} />
+              <Text style={styles.duraklatMetin}>Duraklat</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onBitir} activeOpacity={0.85} style={{ flex: 1 }}>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.bitirBtn}
+              >
+                <Ionicons name="checkmark" size={17} color="#fff" />
+                <Text style={styles.bitirMetin}>Adımı bitir</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* tamamlanan */}
@@ -766,7 +967,7 @@ function AdimDuzenleModal({
   }
 
   return (
-    <Modal visible={acik} animationType="slide" transparent statusBarTranslucent>
+    <Modal visible={acik} animationType="slide" transparent statusBarTranslucent onRequestClose={onKapat}>
       <Pressable style={styles.overlay} onPress={onKapat} />
       <View style={styles.modalSheet}>
         <View style={styles.sheetTutamac} />
@@ -887,7 +1088,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerBaslik: { fontSize: 16, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
-  headerSag: { minWidth: 36, alignItems: 'flex-end' },
+  headerSag: { minWidth: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   bittiBtn: {
     height: 36,
     paddingHorizontal: 16,
@@ -927,6 +1128,7 @@ const styles = StyleSheet.create({
   adimAdDone: { color: COLORS.textLight, textDecorationLine: 'line-through' },
   adimMetaSatir: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   adimMeta: { fontSize: 11.5, fontWeight: '600' },
+  devamRozet: { fontSize: 11.5, fontWeight: '800' },
 
   // İlerleme çubuğu (hero altında)
   ilerlemeSatir: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 14, marginBottom: 18 },

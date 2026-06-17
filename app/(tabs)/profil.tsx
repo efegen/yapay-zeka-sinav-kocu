@@ -65,6 +65,16 @@ function sinifTam(sinif?: string) {
   return sinif === 'mezun' ? 'Mezun' : `${sinif}. Sınıf`;
 }
 
+// Biriken odak süresini (saniye) stat kartı için derli toplu birime çevirir.
+// < 1 saat → dakika, aksi halde saat (tam saatte ondalıksız, değilse tek ondalık).
+function odakBirimi(saniye: number): { deger: string; birim?: string } {
+  if (!saniye || saniye <= 0) return { deger: '—' };
+  const dk = Math.round(saniye / 60);
+  if (dk < 60) return { deger: String(Math.max(1, dk)), birim: 'dk' };
+  const saat = Math.round((saniye / 3600) * 10) / 10;
+  return { deger: Number.isInteger(saat) ? String(saat) : saat.toFixed(1), birim: 'sa' };
+}
+
 // ─── Ana bileşen ────────────────────────────────────────────────────────────
 
 export default function Profil() {
@@ -572,7 +582,7 @@ function GenelSekme({
   denemeSayisi: number;
 }) {
   const toplamSoru = profil?.toplamSoru ?? 0;
-  const toplamOdakSaat = profil?.toplamOdakSaat ?? 0;
+  const odak = odakBirimi(profil?.toplamOdakSaniye ?? 0);
   const uyelikTarihi = profil?.uyelikTarihi ?? null;
 
   const statlar = [
@@ -587,8 +597,8 @@ function GenelSekme({
     },
     {
       icon: 'timer-outline' as const,
-      deger: toplamOdakSaat > 0 ? String(toplamOdakSaat) : '—',
-      birim: toplamOdakSaat > 0 ? 'sa' : undefined,
+      deger: odak.deger,
+      birim: odak.birim,
       etiket: 'odak süresi',
       renk: COLORS.accent,
       bg: ACCENT_LIGHT,

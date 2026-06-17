@@ -10,6 +10,7 @@ import {
   query,
   where,
   Timestamp,
+  increment,
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import {
@@ -322,6 +323,24 @@ export const adimlariGuncelle = async (
   const sure = adimlar.reduce((t, a) => t + (a.dk || 0), 0);
   const tumuBitti = adimlar.length > 0 && adimlar.every((a) => a.done);
   await updateDoc(gorevRef, { adimlar, sure, tamamlandi: tumuBitti });
+};
+
+/**
+ * Bir plan adımı tamamlandığında "Toplam Emek" sayaçlarını artırır.
+ * - `odakSaniye`: adımda GERÇEKTEN geçen süre. Erken "Bitir"de tüm süre değil,
+ *   yalnızca sayaçta geçen kadarı yazılır (mola süresi odak sayılmaz → 0 gelir).
+ * - `soru`: yalnızca soru adımlarında çözülen soru sayısı.
+ * Süre saniye olarak biriktirilir; gösterimde dakika/saate çevrilir.
+ */
+export const calismaIstatistikEkle = async (
+  uid: string,
+  { odakSaniye, soru }: { odakSaniye: number; soru: number }
+): Promise<void> => {
+  const patch: Record<string, unknown> = {};
+  if (odakSaniye > 0) patch.toplamOdakSaniye = increment(odakSaniye);
+  if (soru > 0) patch.toplamSoru = increment(soru);
+  if (Object.keys(patch).length === 0) return;
+  await updateDoc(doc(db, 'users', uid), patch);
 };
 
 export const gorevSil = async (uid: string, gorevId: string): Promise<void> => {
