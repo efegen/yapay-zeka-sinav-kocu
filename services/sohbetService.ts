@@ -182,13 +182,6 @@ export function kartMetni(k: Kart): string {
         .join('\n');
       return `"${v.baslik}" haftalık planını ÜRETTİN${v.tarihAraligi ? ` (${v.tarihAraligi})` : ''}:\n${gunler}`;
     }
-    case 'pomodoroPlani': {
-      const v = k.veri;
-      const akis = (v.bloklar ?? [])
-        .map((b) => `${b.sure} ${b.tip === 'mola' ? 'mola' : b.ders}`)
-        .join(' → ');
-      return `"${v.baslik}" Pomodoro planını ÜRETTİN: ${akis}`;
-    }
     case 'takvimAksiyonu': {
       const v = k.veri;
       const kapsam =
@@ -258,7 +251,7 @@ export function ayracEtiketi(ts: number): string {
  */
 export function sohbetGorseli(s: Sohbet): { ikon: IoniconAdi; renk: string } {
   const tipler = new Set(s.mesajlar.flatMap((m) => m.kartlar ?? []).map((k) => k.tip));
-  if (tipler.has('pomodoroPlani') || tipler.has('oturumZamanPlani') || tipler.has('molaRecetesi'))
+  if (tipler.has('oturumZamanPlani') || tipler.has('molaRecetesi'))
     return { ikon: 'timer-outline', renk: COLORS.accent };
   if (
     tipler.has('denemeKiyasi') ||

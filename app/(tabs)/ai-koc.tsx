@@ -41,7 +41,7 @@ const ONERILER = [
   'Bu hafta neye odaklanmalıyım?',
   'Limit konusunu nasıl çalışırım?',
   'Motivasyonum düştü, ne yapmalıyım?',
-  'Bana bir Pomodoro planı kur',
+  'Son denememi değerlendir',
 ];
 
 /** Mesaj listesi satırı: mesaj baloncuğu ya da (gün değişiminde) zaman ayracı. */
@@ -236,7 +236,6 @@ export default function AiKoc() {
 
   /** Kart CTA/aksiyonu: derin bağlantı veya sohbete mesaj. */
   function aksiyonYap(aksiyon?: string, mesaj?: string) {
-    if (aksiyon === 'pomodoro') return void router.push('/(tabs)/pomodoro' as any);
     if (aksiyon === 'takvim') return void router.push('/(tabs)/takvim' as any);
     if (aksiyon === 'foto') return void setKaynakModal(true);
     if (mesaj) return void gonder(mesaj);

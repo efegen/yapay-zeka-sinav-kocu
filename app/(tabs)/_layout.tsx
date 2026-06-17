@@ -18,9 +18,8 @@ export default function TabsLayout() {
           tabBarStyle: { display: 'none' },
         }}
       />
-      <Tabs.Screen name="pomodoro" options={{ title: 'Sayaç' }} />
+      <Tabs.Screen name="denemeler" options={{ title: 'Denemeler' }} />
       <Tabs.Screen name="profil" options={{ title: 'Profil' }} />
-      <Tabs.Screen name="denemeler" options={{ href: null }} />
       <Tabs.Screen name="timer" options={{ href: null }} />
     </Tabs>
   );

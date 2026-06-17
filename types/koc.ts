@@ -4,7 +4,6 @@
 
 /** Kart CTA / buton aksiyonu — uygulama içi derin bağlantı veya sohbet niyeti. */
 export type KocAksiyon =
-  | 'pomodoro'
   | 'plan'
   | 'konu'
   | 'deneme'
@@ -43,13 +42,6 @@ export interface BaglamSeridiVeri {
 export interface NiyetIzgarasiVeri {
   varyant: 'izgara' | 'hap';
   niyetler: { id: string; baslik: string; altMetin?: string; icon: string; renk: Renk }[];
-}
-
-export interface PomodoroPlaniVeri {
-  baslik: string;
-  ozet: string;
-  bloklar: { sure: string; ders: string; tip: 'odak' | 'mola'; renk?: Renk }[];
-  cta?: KartCTA;
 }
 
 export interface KonuAdimlariVeri {
@@ -188,7 +180,6 @@ export interface KartTipleri {
   gunlukBrifing: GunlukBrifingVeri;
   baglamSeridi: BaglamSeridiVeri;
   niyetIzgarasi: NiyetIzgarasiVeri;
-  pomodoroPlani: PomodoroPlaniVeri;
   konuAdimlari: KonuAdimlariVeri;
   miniDenemeAnalizi: MiniDenemeAnaliziVeri;
   cozumAdimlari: CozumAdimlariVeri;
@@ -262,7 +253,6 @@ export const KART_TIPLERI: KartTipi[] = [
   'gunlukBrifing',
   'baglamSeridi',
   'niyetIzgarasi',
-  'pomodoroPlani',
   'miniDenemeAnalizi',
   'cozumAdimlari',
   'ipucu',

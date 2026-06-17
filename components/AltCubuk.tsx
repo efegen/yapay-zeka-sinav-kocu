@@ -25,12 +25,12 @@ interface SekmeTanim {
   koc?: boolean;
 }
 
-// Sıra: Ana Sayfa · Takvim · AI Koç (merkez, vurgulu) · Sayaç · Profil
+// Sıra: Ana Sayfa · Takvim · AI Koç (merkez, vurgulu) · Denemeler · Profil
 const SEKMELER: SekmeTanim[] = [
   { ad: 'index', etiket: 'Ana Sayfa', ikon: 'home-outline', ikonAktif: 'home' },
   { ad: 'takvim', etiket: 'Takvim', ikon: 'calendar-outline', ikonAktif: 'calendar' },
   { ad: 'ai-koc', etiket: 'AI Koç', ikon: 'sparkles', ikonAktif: 'sparkles', koc: true },
-  { ad: 'pomodoro', etiket: 'Sayaç', ikon: 'timer-outline', ikonAktif: 'timer' },
+  { ad: 'denemeler', etiket: 'Denemeler', ikon: 'clipboard-outline', ikonAktif: 'clipboard' },
   { ad: 'profil', etiket: 'Profil', ikon: 'person-outline', ikonAktif: 'person' },
 ];
 

@@ -28,7 +28,7 @@ Uygulama; React Native (Expo) ile yazılmış olup **Android, iOS ve Web** üzer
 ## Özellikler
 
 ### 🤖 AI Koç (sohbet)
-Tam ekran, çoklu sohbet destekli bir koçluk asistanı. Yanıtlar düz metin değil **yapılandırılmış kartlar** olarak gelir — koç haftalık plan, Pomodoro programı, formül kartı, deneme kıyası, hedef özeti, projeksiyon, çözüm adımları gibi **19 farklı zengin kart tipi** üretebilir. Sohbet geçmişi cihazda saklanır ve geçmiş çekmecesinden erişilebilir.
+Tam ekran, çoklu sohbet destekli bir koçluk asistanı. Yanıtlar düz metin değil **yapılandırılmış kartlar** olarak gelir — koç haftalık plan, formül kartı, deneme kıyası, hedef özeti, projeksiyon, çözüm adımları gibi **18 farklı zengin kart tipi** üretebilir. Sohbet geçmişi cihazda saklanır ve geçmiş çekmecesinden erişilebilir.
 
 - **Koç hafızası:** Öğrencinin zorlandığı/iyi olduğu konular ve kalıcı kişisel notlar (rutin, tercih, duygu) zamanla öğrenilir; sonraki planlar bunlara göre kişiselleştirilir.
 - **Veri dürüstlüğü:** Koç elinde olmayan veriyi (taban puan, geçmiş net) uydurmaz; gerekirse öğrenciden ister.
@@ -42,9 +42,6 @@ Tam ekran, çoklu sohbet destekli bir koçluk asistanı. Yanıtlar düz metin de
 
 ### 📅 Takvim & Haftalık Plan
 Çalışma planı oluşturma, günlük/haftalık takvim görünümü ve AI'ın ürettiği haftalık planı tek dokunuşla takvime aktarma.
-
-### ⏱️ Pomodoro / Sayaç
-Odak sayacı ve çalışma istatistikleri (toplam odak süresi, çözülen soru takibi).
 
 ### 📊 Deneme Takibi
 TYT/AYT deneme sonucu ekleme. Öğrenci yalnızca **doğru + yanlış** girer; **boş** ve **net** (ÖSYM standardı `net = D − Y/4`) otomatik hesaplanır. Denemeler listelenir ve koç tarafından kıyaslanabilir.
@@ -103,7 +100,6 @@ Worker'ın ürettiği kart sözleşmesi (`tip` + `veri`) hem Worker hem de istem
 │   ├── (tabs)/             #   Alt sekmeler: Ana Sayfa, Takvim, AI Koç, Sayaç, Profil
 │   ├── onboarding.tsx      #   Kayıt + KVKK onayı
 │   ├── login.tsx           #   Giriş
-│   ├── soru-yukle.tsx      #   Fotoğrafla soru çözme
 │   ├── koc-hafiza.tsx      #   Koç hafızası yönetim ekranı
 │   ├── deneme-ekle.tsx     #   Deneme sonucu girişi
 │   └── plan-kur.tsx        #   Çalışma planı oluşturma

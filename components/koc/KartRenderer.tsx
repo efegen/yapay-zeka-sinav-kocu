@@ -5,7 +5,6 @@ import { COLORS } from '../../constants/colors';
 import type { Kart } from '../../types/koc';
 import { RADIUS, GOLGE_KART } from './tokens';
 
-import { PomodoroPlani } from './kartlar/PomodoroPlani';
 import { KonuAdimlari } from './kartlar/KonuAdimlari';
 import { MiniDenemeAnalizi } from './kartlar/MiniDenemeAnalizi';
 import { CozumAdimlari } from './kartlar/CozumAdimlari';
@@ -35,8 +34,6 @@ interface KartRendererProps {
 
 function icerikSec(kart: Kart, onAksiyon: KartRendererProps['onAksiyon'], onKartGuncelle: KartRendererProps['onKartGuncelle']) {
   switch (kart.tip) {
-    case 'pomodoroPlani':
-      return <PomodoroPlani veri={kart.veri} onAksiyon={onAksiyon} onGuncelle={(v) => onKartGuncelle({ ...kart, veri: v })} />;
     case 'konuAdimlari':
       return <KonuAdimlari veri={kart.veri} onAksiyon={onAksiyon} onGuncelle={(v) => onKartGuncelle({ ...kart, veri: v })} />;
     case 'miniDenemeAnalizi':

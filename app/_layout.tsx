@@ -56,7 +56,6 @@ export default function RootLayout() {
           <Stack.Screen name="login" />
           <Stack.Screen name="onboarding" />
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="soru-yukle" />
           <Stack.Screen name="deneme-ekle" />
           <Stack.Screen name="hata-analiz" />
           <Stack.Screen name="istatistik" />
