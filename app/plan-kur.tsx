@@ -23,6 +23,7 @@ import { Adim, AdimTip, Gorev, gorevEkle, gunGorevleriniGetir } from '../service
 import { COLORS } from '../constants/colors';
 import { dersRenk } from '../constants/dersler';
 import { yksSinavGunuMu } from '../constants/sinav';
+import { useProfile } from '../hooks/useProfile';
 import { bildir } from '../utils/bildirim';
 
 const AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -85,6 +86,7 @@ export default function PlanKur() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ tarih?: string | string[] }>();
   const uid = auth.currentUser?.uid;
+  const { profil } = useProfile();
 
   // Takvimde seçili gün param olarak gelir (builder'da tarih seçici yok — sade).
   const hedefTarih = useMemo(() => {
@@ -95,8 +97,8 @@ export default function PlanKur() {
     return t;
   }, [params.tarih]);
 
-  // YKS sınav gününe (TYT/AYT) çalışma planı eklenemez.
-  const sinavGunu = useMemo(() => yksSinavGunuMu(hedefTarih), [hedefTarih]);
+  // YKS sınav gününe (TYT/AYT) çalışma planı eklenemez — hedef yıl sınıfa göre değişir.
+  const sinavGunu = useMemo(() => yksSinavGunuMu(hedefTarih, profil?.sinif), [hedefTarih, profil?.sinif]);
 
   const [baslik, setBaslik] = useState('');
   const [secili, setSecili] = useState<{ grup: string; ders: string } | null>(null);

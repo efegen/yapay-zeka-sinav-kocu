@@ -22,6 +22,7 @@ import { gorevEkle, gunGorevleriniGetir } from '../../services/firestoreService'
 import { COLORS } from '../../constants/colors';
 import { dersRenk } from '../../constants/dersler';
 import { yksSinavGunuMu } from '../../constants/sinav';
+import { useProfile } from '../../hooks/useProfile';
 import { GunTaslak, planiTaslaklaraCevir } from '../../utils/planAktar';
 import type { HaftalikPlanVeri } from '../../types/koc';
 
@@ -57,6 +58,7 @@ export function PlaniTakvimeAktarModal({
   // uid'i dinle ki modal açıkken oturum hazır olunca "giriş gerekli" dalına takılmasın.
   const [uid, setUid] = useState<string | undefined>(() => auth.currentUser?.uid);
   useEffect(() => onAuthStateChanged(auth, (k) => setUid(k?.uid)), []);
+  const { profil } = useProfile();
 
   const [yukleniyor, setYukleniyor] = useState(true);
   const [taslaklar, setTaslaklar] = useState<GunTaslak[]>([]);
@@ -111,7 +113,7 @@ export function PlaniTakvimeAktarModal({
       setSecili(
         t.map((x, i) => {
           if (!x.tarih || m[i].zatenVar) return false;
-          return !yksSinavGunuMu(x.tarih);
+          return !yksSinavGunuMu(x.tarih, profil?.sinif);
         })
       );
       setYukleniyor(false);
@@ -124,12 +126,12 @@ export function PlaniTakvimeAktarModal({
     // değişince efekt yeniden çalışıp sonuç ekranını silmesin. Modal her açılışta
     // (acik=true) güncel veriyi okur.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acik, uid]);
+  }, [acik, uid, profil?.sinif]);
 
   function toggle(i: number) {
     const t = taslaklar[i];
     // Tarihi çözülemeyen, o gün zaten ekli (kopya) ya da YKS sınav günü olan günler seçilemez.
-    if (!t.tarih || meta[i]?.zatenVar || yksSinavGunuMu(t.tarih)) return;
+    if (!t.tarih || meta[i]?.zatenVar || yksSinavGunuMu(t.tarih, profil?.sinif)) return;
     setSecili((s) => s.map((v, j) => (j === i ? !v : v)));
   }
 
@@ -235,7 +237,7 @@ export function PlaniTakvimeAktarModal({
                 const renk = dersRenk(t.ders);
                 const m = meta[i] ?? { mevcutSayi: 0, zatenVar: false };
                 const sec = secili[i];
-                const sinavGunu = t.tarih ? yksSinavGunuMu(t.tarih) : false;
+                const sinavGunu = t.tarih ? yksSinavGunuMu(t.tarih, profil?.sinif) : false;
                 const eklenemez = !t.tarih || m.zatenVar || sinavGunu;
                 return (
                   <TouchableOpacity
