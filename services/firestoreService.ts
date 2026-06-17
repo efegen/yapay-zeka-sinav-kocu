@@ -462,6 +462,7 @@ export interface Yanlis {
   konu: string; // "Türev"
   not?: string; // serbest açıklama / sorunun özeti
   kategori?: NedenKategori; // dikkatsizlik | sure | bilgi (opsiyonel)
+  gorsel?: string; // ekli görsel — sıkıştırılmış JPEG data URL (opsiyonel)
   ogrenildi: boolean; // tekrar edilip öğrenildi mi
   olusturmaTarihi: Timestamp;
 }

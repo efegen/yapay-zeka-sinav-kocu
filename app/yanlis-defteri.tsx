@@ -7,11 +7,16 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Timestamp } from 'firebase/firestore';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { COLORS } from '../constants/colors';
 import { dersRenk } from '../constants/dersler';
 import { bildir } from '../utils/bildirim';
@@ -35,6 +40,31 @@ const KATEGORI_SIRA: NedenKategori[] = ['dikkatsizlik', 'sure', 'bilgi'];
 // "AYT Matematik" → "Matematik" (renk eşlemesi için).
 const dersBase = (d: string) => d.replace(/^(TYT|AYT)\s/, '');
 
+// Firestore 1MB doküman sınırı için: görseli ~1000px'e küçült + JPEG sıkıştır,
+// base64 data URL döndür. Hâlâ büyükse daha agresif sıkıştırır; olmazsa null.
+async function gorseliKucult(uri: string): Promise<string | null> {
+  const SINIR = 950_000; // base64 karakter (~bayt) tavanı
+  try {
+    let r = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1000 } }],
+      { compress: 0.55, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+    );
+    if (r.base64 && r.base64.length > SINIR) {
+      r = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.4, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+    }
+    if (!r.base64 || r.base64.length > SINIR) return null;
+    return `data:image/jpeg;base64,${r.base64}`;
+  } catch (e) {
+    console.error('[YanlisDefteri] görsel işleme hatası:', e);
+    return null;
+  }
+}
+
 function tarihKisa(ts?: Timestamp): string {
   if (!ts?.toDate) return '';
   const d = ts.toDate();
@@ -54,7 +84,36 @@ export default function YanlisDefteri() {
   const [konu, setKonu] = useState('');
   const [not, setNot] = useState('');
   const [kategori, setKategori] = useState<NedenKategori | null>(null);
+  const [gorsel, setGorsel] = useState(''); // data URL ('' = yok)
+  const [gorselYukleniyor, setGorselYukleniyor] = useState(false);
   const [ekleniyor, setEkleniyor] = useState(false);
+
+  async function gorselSec(kaynak: 'kamera' | 'galeri') {
+    const izin =
+      kaynak === 'kamera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!izin.granted) {
+      bildir('İzin gerekli', 'Görsel eklemek için kamera/galeri izni vermelisin.');
+      return;
+    }
+    const secim =
+      kaynak === 'kamera'
+        ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({
+            quality: 0.8,
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          });
+    if (secim.canceled) return;
+    setGorselYukleniyor(true);
+    const dataUrl = await gorseliKucult(secim.assets[0].uri);
+    setGorselYukleniyor(false);
+    if (!dataUrl) {
+      bildir('Görsel eklenemedi', 'Bu görsel çok büyük. Daha küçük/net bir görsel ya da ekran görüntüsü dene.');
+      return;
+    }
+    setGorsel(dataUrl);
+  }
 
   const yukle = useCallback(() => {
     if (!uid) {
@@ -77,6 +136,7 @@ export default function YanlisDefteri() {
     setKonu('');
     setNot('');
     setKategori(null);
+    setGorsel('');
   }
 
   async function ekle() {
@@ -95,6 +155,7 @@ export default function YanlisDefteri() {
       konu: konu.trim(),
       not: not.trim() || undefined,
       kategori: kategori || undefined,
+      gorsel: gorsel || undefined,
       ogrenildi: false,
     };
     try {
@@ -224,6 +285,32 @@ export default function YanlisDefteri() {
               })}
             </View>
 
+            <Text style={styles.formEtiket}>Görsel (opsiyonel)</Text>
+            {gorsel ? (
+              <View style={styles.gorselOnizleSar}>
+                <Image source={{ uri: gorsel }} style={styles.gorselOnizle} resizeMode="cover" />
+                <TouchableOpacity style={styles.gorselSil} onPress={() => setGorsel('')} hitSlop={8} activeOpacity={0.85}>
+                  <Ionicons name="close" size={15} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : gorselYukleniyor ? (
+              <View style={styles.gorselYuk}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.gorselYukMetin}>Görsel hazırlanıyor…</Text>
+              </View>
+            ) : (
+              <View style={styles.gorselBtnRow}>
+                <TouchableOpacity style={styles.gorselBtn} onPress={() => gorselSec('kamera')} activeOpacity={0.85}>
+                  <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
+                  <Text style={styles.gorselBtnMetin}>Kamera</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.gorselBtn} onPress={() => gorselSec('galeri')} activeOpacity={0.85}>
+                  <Ionicons name="images-outline" size={16} color={COLORS.primary} />
+                  <Text style={styles.gorselBtnMetin}>Galeri</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             <TouchableOpacity activeOpacity={0.9} onPress={ekle} disabled={ekleniyor} style={{ marginTop: 14 }}>
               <LinearGradient
                 colors={[COLORS.primary, COLORS.accent]}
@@ -301,6 +388,7 @@ function YanlisKart({
 }) {
   const r = dersRenk(dersBase(y.ders));
   const kat = y.kategori ? KATEGORILER[y.kategori] : null;
+  const [buyuk, setBuyuk] = useState(false);
   return (
     <View style={[styles.kart, ogrenilmis && styles.kartOgrenilmis]}>
       <View style={[styles.kartNokta, { backgroundColor: r }]} />
@@ -311,6 +399,14 @@ function YanlisKart({
         </View>
         <Text style={[styles.kartKonu, ogrenilmis && styles.kartKonuOgrenilmis]}>{y.konu}</Text>
         {!!y.not && <Text style={styles.kartNot} numberOfLines={2}>{y.not}</Text>}
+        {!!y.gorsel && (
+          <TouchableOpacity onPress={() => setBuyuk(true)} activeOpacity={0.9} style={styles.kartGorselSar}>
+            <Image source={{ uri: y.gorsel }} style={styles.kartGorsel} resizeMode="cover" />
+            <View style={styles.kartGorselRozet}>
+              <Ionicons name="expand-outline" size={12} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        )}
         <View style={styles.kartAltSatir}>
           {kat && (
             <View style={[styles.katRozet, { backgroundColor: kat.renk + '16' }]}>
@@ -335,6 +431,16 @@ function YanlisKart({
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Tam ekran görüntüleyici */}
+      <Modal visible={buyuk} transparent animationType="fade" onRequestClose={() => setBuyuk(false)}>
+        <Pressable style={styles.buyukArka} onPress={() => setBuyuk(false)}>
+          {!!y.gorsel && <Image source={{ uri: y.gorsel }} style={styles.buyukGorsel} resizeMode="contain" />}
+          <View style={styles.buyukKapat}>
+            <Ionicons name="close" size={22} color="#fff" />
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -393,6 +499,43 @@ const styles = StyleSheet.create({
     height: 48, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
   kaydetMetin: { fontSize: 15, fontWeight: '800', color: '#fff' },
+
+  // Görsel ekleme (form)
+  gorselBtnRow: { flexDirection: 'row', gap: 8 },
+  gorselBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 11, borderRadius: 11, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: COLORS.primary + '55', backgroundColor: COLORS.primaryLight + '70',
+  },
+  gorselBtnMetin: { fontSize: 12.5, fontWeight: '800', color: COLORS.primary },
+  gorselYuk: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14, justifyContent: 'center' },
+  gorselYukMetin: { fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary },
+  gorselOnizleSar: { position: 'relative', alignSelf: 'flex-start' },
+  gorselOnizle: { width: 120, height: 120, borderRadius: 12, backgroundColor: COLORS.backgroundSecondary },
+  gorselSil: {
+    position: 'absolute', top: -6, right: -6,
+    width: 26, height: 26, borderRadius: 99, backgroundColor: COLORS.error,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: COLORS.card,
+  },
+
+  // Görsel (kart)
+  kartGorselSar: { marginTop: 8, alignSelf: 'flex-start' },
+  kartGorsel: { width: 84, height: 84, borderRadius: 10, backgroundColor: COLORS.backgroundSecondary },
+  kartGorselRozet: {
+    position: 'absolute', right: 5, bottom: 5,
+    width: 22, height: 22, borderRadius: 7, backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  // Tam ekran görüntüleyici
+  buyukArka: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center' },
+  buyukGorsel: { width: '92%', height: '80%' },
+  buyukKapat: {
+    position: 'absolute', top: 52, right: 20,
+    width: 40, height: 40, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center', alignItems: 'center',
+  },
 
   // Boş / yükleniyor
   merkez: { paddingVertical: 50, alignItems: 'center' },
