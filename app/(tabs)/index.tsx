@@ -21,7 +21,7 @@ import { YKS_SEZON_BASLANGIC, hedefYksTarihi, hedefYksYili } from '../../constan
 import { gunFarki, tarihUzun, aralikOrani } from '../../utils/tarih';
 import { auth } from '../../services/firebaseConfig';
 import { denemeleriGetir } from '../../services/firestoreService';
-import { netlerdenSiralama } from '../../services/yokatlasService';
+import { formTahminiHesapla } from '../../utils/siralamaTahmin';
 import { fmtSira, type DenemeSonuc } from '../../models/deneme';
 
 const GUNLER = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -37,6 +37,23 @@ const AYT_ALANLARI: Record<string, string[]> = {
   SOZ: ['ayt_edebiyat', 'ayt_tarih1', 'ayt_tarih2', 'ayt_cografya1', 'ayt_cografya2', 'ayt_felsefe', 'ayt_din'],
   DIL: ['ayt_yabancidil'],
 };
+
+// Günün ipucu — sabit, küratörlü çalışma önerileri. AI yok; güne göre
+// deterministik seçilir (gün içinde sabit kalır, her gün değişir).
+const GUNLUK_IPUCLARI: { baslik: string; metin: string }[] = [
+  { baslik: 'Güne zor dersle başla', metin: 'Zihnin en taze anı sabah; en çok zorlandığın konuyu güne ilk işe al.' },
+  { baslik: 'Konuyu soruyla kapat', metin: 'Bir konuyu bitirince hemen 10–15 soru çöz; öğrenme ancak uygulamayla kalıcı olur.' },
+  { baslik: 'Yanlışların asıl hazinen', metin: 'Her yanlışı not al, nedenini yaz. Tekrar eden hatalar en hızlı net kaynağındır.' },
+  { baslik: 'Molayı atlama', metin: '45 dakika çalış, 10 dakika dinlen. Yorgun beyin yeni bilgiyi tutmaz.' },
+  { baslik: 'Deneme bir provadır', metin: 'Haftada en az bir deneme çöz; gerçek sınav temposunu ancak böyle kazanırsın.' },
+  { baslik: 'Az ama her gün', metin: 'Düzenli 2 saat, ara sıra 8 saatten iyidir. Süreklilik sıralamayı taşır.' },
+  { baslik: 'TYT’yi küçümseme', metin: 'Sıralamanın temeli TYT netleri. Temel matematik ve paragrafa her gün biraz zaman ayır.' },
+  { baslik: 'Dünü 5 dakikada tazele', metin: 'Dün çalıştığını bugün kısaca gözden geçir; unutma eğrisini böyle kırarsın.' },
+  { baslik: 'Konuyu birine anlat', metin: 'Bir konuyu anlatabiliyorsan öğrenmişsindir. Anlatamadığın yer asıl eksiğindir.' },
+  { baslik: 'Hedefini görünür tut', metin: 'Neden çalıştığını hatırla; hedef sıralaman zor günlerde yakıtın olur.' },
+  { baslik: 'Uyku da çalışmadır', metin: 'Öğrendiklerin uykuda pekişir. 7 saatin altına düşme, yoksa verim düşer.' },
+  { baslik: 'Telefonu uzağa koy', metin: 'Çalışırken telefon başka odada olsun; dikkat dağınıklığı en sessiz net hırsızıdır.' },
+];
 
 export default function AnaSayfa() {
   const { profil, yukleniyor } = useProfile();
@@ -83,6 +100,11 @@ export default function AnaSayfa() {
 
   const bugun = useMemo(() => new Date(), []);
   const tarihMetni = `${GUNLER[bugun.getDay()]} · ${bugun.getDate()} ${AYLAR[bugun.getMonth()]}`;
+  // Günün ipucu: güne göre sabit indeks (gün içinde değişmez, her gün döner).
+  const gununIpucu = useMemo(
+    () => GUNLUK_IPUCLARI[Math.floor(bugun.getTime() / 86400000) % GUNLUK_IPUCLARI.length],
+    [bugun]
+  );
   // Hedef YKS sınıfa göre değişir: 11. sınıf bir sonraki YKS'ye girer.
   const hedefTarih = useMemo(() => hedefYksTarihi(profil?.sinif), [profil?.sinif]);
   const hedefYil = hedefYksYili(profil?.sinif);
@@ -104,16 +126,11 @@ export default function AnaSayfa() {
 
   const diploma = profil?.diplomaNotu ?? 0;
   const tamDenemeler = useMemo(() => denemeler.filter((d) => d.kapsam === 'ikisi'), [denemeler]);
-  const guncelSira = useMemo(
-    () => (tamDenemeler[0] ? netlerdenSiralama(tamDenemeler[0].tytNet, tamDenemeler[0].aytNet, tamDenemeler[0].alan, diploma) : null),
-    [tamDenemeler, diploma]
-  );
-  const oncekiSira = useMemo(
-    () => (tamDenemeler[1] ? netlerdenSiralama(tamDenemeler[1].tytNet, tamDenemeler[1].aytNet, tamDenemeler[1].alan, diploma) : null),
-    [tamDenemeler, diploma]
-  );
+  // Tek denemenin gürültüsü yerine son denemelerin recency-ağırlıklı "güncel form"u.
+  const tahmin = useMemo(() => formTahminiHesapla(tamDenemeler, diploma), [tamDenemeler, diploma]);
+  const guncelSira = tahmin.guncelSira;
   // Pozitif trend = sıralama küçüldü (iyileşme).
-  const siraTrend = guncelSira != null && oncekiSira != null ? oncekiSira - guncelSira : null;
+  const siraTrend = tahmin.trend;
 
   if (yukleniyor) {
     return (
@@ -161,6 +178,31 @@ export default function AnaSayfa() {
       : null;
 
   const siralamaHedefVar = profil?.hedefTuru === 'siralama' && typeof profil?.hedefSiralama === 'number';
+
+  // Tahmini sıralama kartının açıklama notu: model temeli + (varsa) hedef kıyası + OBP uyarısı.
+  const siraNotu = (() => {
+    if (guncelSira == null) {
+      return siralamaHedefVar
+        ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada oluşacak.`
+        : 'Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada görünecek.';
+    }
+    const temel =
+      tahmin.kullanilanDeneme >= 2
+        ? `Son ${tahmin.kullanilanDeneme} tam denemenin ağırlıklı ortalamasına göre — yeni denemeler daha belirleyici.`
+        : 'Tek tam denemene göre — deneme ekledikçe tahmin sağlamlaşır.';
+    const obpUyari = tahmin.diplomaGirildi
+      ? ''
+      : ' Diploma notunu girersen OBP eklenir, tahmin netleşir.';
+    if (siralamaHedefVar) {
+      const hedef = profil!.hedefSiralama!;
+      const hedefMsj =
+        guncelSira <= hedef
+          ? `🎯 Hedefini geçtin — hedef ${hedef.toLocaleString('tr-TR')}. sıra.`
+          : `Hedefin ${hedef.toLocaleString('tr-TR')}. sıra · arada ≈${fmtSira(guncelSira - hedef)} sıra var.`;
+      return hedefMsj + obpUyari;
+    }
+    return temel + obpUyari;
+  })();
 
   return (
     <ScrollView
@@ -335,17 +377,7 @@ export default function AnaSayfa() {
             <Text style={styles.siraAlt}>{guncelSira != null ? 'tahmini sıran' : 'şu anki sıran'}</Text>
           </View>
 
-          <Text style={styles.kartNot}>
-            {guncelSira != null
-              ? siralamaHedefVar
-                ? guncelSira <= profil!.hedefSiralama!
-                  ? `🎯 Hedefini geçtin — hedef ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra.`
-                  : `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra · arada ≈${fmtSira(guncelSira - profil!.hedefSiralama!)} sıra var.`
-                : 'Son tam (TYT+AYT) denemene göre — puan türün ve diploma notun hesaba katılır.'
-              : siralamaHedefVar
-                ? `Hedefin ${profil!.hedefSiralama!.toLocaleString('tr-TR')}. sıra. Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada oluşacak.`
-                : 'Tam bir TYT+AYT denemesi ekleyince tahmini sıralaman burada görünecek.'}
-          </Text>
+          <Text style={styles.kartNot}>{siraNotu}</Text>
 
           <View style={styles.ctaSatir}>
             <TouchableOpacity
@@ -368,7 +400,7 @@ export default function AnaSayfa() {
         </View>
       </Yukselen>
 
-      {/* ─── ★ AI Koç · Günün analizi (koyu) — içgörü yakında ─── */}
+      {/* ─── ★ Günün ipucu (koyu) — sabit küratörlü öneri, güne göre döner ─── */}
       <Yukselen gecikme={360}>
         <View style={styles.analizKart}>
           <View style={styles.analizUst}>
@@ -381,17 +413,13 @@ export default function AnaSayfa() {
               <Ionicons name="sparkles" size={18} color="#fff" />
             </LinearGradient>
             <View style={{ flex: 1 }}>
-              <Text style={styles.analizMikro}>AI KOÇ · GÜNÜN ANALİZİ</Text>
-              <Text style={styles.analizBaslik}>Bugün neye odaklanmalısın</Text>
+              <Text style={styles.analizMikro}>GÜNÜN İPUCU</Text>
+              <Text style={styles.analizBaslik}>{gununIpucu.baslik}</Text>
             </View>
-            <YakindaPill koyu />
           </View>
 
           <View style={styles.analizPanel}>
-            <Text style={styles.analizPanelMetin}>
-              Denemelerini ve çalışma verilerini ekledikçe koçun en zayıf konunu belirleyip
-              sana özel tekrar ve soru önerileri sunacak.
-            </Text>
+            <Text style={styles.analizPanelMetin}>{gununIpucu.metin}</Text>
           </View>
 
           <View style={styles.analizAksiyon}>
@@ -402,14 +430,6 @@ export default function AnaSayfa() {
             >
               <Ionicons name="chatbubble-ellipses" size={14} color={COLORS.ink} />
               <Text style={styles.analizBirincilMetin}>AI Koç’a sor</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.analizIkincil}
-              activeOpacity={0.85}
-              onPress={() => router.push('/soru-yukle' as any)}
-            >
-              <Ionicons name="camera-outline" size={14} color="#fff" />
-              <Text style={styles.analizIkincilMetin}>Soru yükle</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -626,9 +646,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 12,
   },
   analizBirincilMetin: { fontSize: 12.5, fontWeight: '800', color: COLORS.ink },
-  analizIkincil: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14,
-  },
-  analizIkincilMetin: { fontSize: 12.5, fontWeight: '700', color: '#fff' },
 });
