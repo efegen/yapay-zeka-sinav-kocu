@@ -206,10 +206,21 @@ export default function Denemeler() {
                     {tarihKisa(d.tarih.toDate())} · {KAPSAM_ETIKET[d.kapsam]}
                     {d.sure ? ` · ${d.sure} dk` : ''}
                   </Text>
-                  <Text style={styles.kartNet}>
-                    {fmtNet(d.toplamNet)}
-                    <Text style={styles.kartNetEtiket}> net</Text>
-                  </Text>
+                  <View style={styles.netSatir}>
+                    {d.kapsam !== 'ayt' && (
+                      <View style={styles.netParca}>
+                        <Text style={styles.netEtiket}>TYT NET</Text>
+                        <Text style={styles.netDeger}>{fmtNet(d.tytNet)}</Text>
+                      </View>
+                    )}
+                    {d.kapsam === 'ikisi' && <View style={styles.netAyirac} />}
+                    {d.kapsam !== 'tyt' && (
+                      <View style={styles.netParca}>
+                        <Text style={styles.netEtiket}>AYT NET</Text>
+                        <Text style={styles.netDeger}>{fmtNet(d.aytNet)}</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
 
                 <View style={styles.sira}>
@@ -306,8 +317,13 @@ const styles = StyleSheet.create({
   bilgi: { flex: 1, minWidth: 0 },
   kartAd: { fontSize: 15, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 },
   kartMeta: { fontSize: 11, fontWeight: '600', color: COLORS.textLight, marginTop: 3 },
-  kartNet: { fontSize: 18, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, marginTop: 7, fontVariant: ['tabular-nums'] },
-  kartNetEtiket: { fontSize: 11, fontWeight: '700', color: COLORS.textLight, letterSpacing: 0 },
+
+  // ── TYT / AYT netleri ayrı ayrı (kapsam'a göre tek ya da çift kolon) ──
+  netSatir: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  netParca: { minWidth: 0 },
+  netEtiket: { fontSize: 8.5, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase', color: COLORS.textLight },
+  netDeger: { fontSize: 17, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, marginTop: 2, fontVariant: ['tabular-nums'] },
+  netAyirac: { width: 1, alignSelf: 'stretch', marginVertical: 2, backgroundColor: COLORS.cardBorder },
 
   sira: { flexShrink: 0, alignItems: 'flex-end', alignSelf: 'flex-start' },
   siraEtiket: { fontSize: 8.5, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase', color: COLORS.textLight },
