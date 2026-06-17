@@ -35,10 +35,17 @@ import {
 } from '../../services/firestoreService';
 import { useProfile, Profil as ProfilType } from '../../hooks/useProfile';
 import { COLORS } from '../../constants/colors';
+import { hedefYksYili } from '../../constants/sinav';
 import { ALT_CUBUK_BOSLUK } from '../../components/AltCubuk';
 import { bildir } from '../../utils/bildirim';
 
-type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis' | 'hedefler' | 'eposta';
+type AktifModal = null | 'sifre' | 'kvkk' | 'hesapSil' | 'cikis' | 'hedefler' | 'eposta' | 'sinif';
+
+const SINIF_SECENEKLERI = [
+  { deger: '11', baslik: '11. Sınıf' },
+  { deger: '12', baslik: '12. Sınıf' },
+  { deger: 'mezun', baslik: 'Mezun' },
+];
 
 const SEP = 'rgba(60,60,67,0.1)';
 const ACCENT_LIGHT = '#FCE7F3';
@@ -81,6 +88,7 @@ export default function Profil() {
   const [epostaHata, setEpostaHata] = useState('');
   const [hedefSoru, setHedefSoru] = useState(0);
   const [hedefGun, setHedefGun] = useState(1);
+  const [sinifSecim, setSinifSecim] = useState('');
 
   const [trackWidth, setTrackWidth] = useState(0);
   const tabAnim = useRef(new Animated.Value(0)).current;
@@ -121,6 +129,27 @@ export default function Profil() {
     setHedefSoru(profil?.gunlukSoruHedefi ?? 0);
     setHedefGun(profil?.haftaCalismaSayisi ?? 1);
     setAktifModal('hedefler');
+  }
+
+  function sinifAc() {
+    setSinifSecim(profil?.sinif ?? '');
+    setAktifModal('sinif');
+  }
+
+  async function sinifKaydet() {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !sinifSecim) return;
+    setIslemYukleniyor(true);
+    try {
+      await profilGuncelle(uid, { sinif: sinifSecim });
+      modalKapat();
+      bildir('Kaydedildi', 'Sınıfın güncellendi.');
+    } catch (e) {
+      console.error('[Profil] sinif kaydetme hatasi:', e);
+      bildir('Hata', 'Sınıf kaydedilemedi, tekrar dene.');
+    } finally {
+      setIslemYukleniyor(false);
+    }
   }
 
   async function hedefleriKaydet() {
@@ -329,6 +358,7 @@ export default function Profil() {
             <AyarlarSekme
               profil={profil}
               onKocHafiza={() => router.push('/koc-hafiza' as any)}
+              onSinif={sinifAc}
               onHedefler={hedeflerAc}
               onSifre={() => setAktifModal('sifre')}
               onEposta={() => setAktifModal('eposta')}
@@ -493,6 +523,42 @@ export default function Profil() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Sınıf modal ── */}
+      <Modal visible={aktifModal === 'sinif'} transparent animationType="slide" statusBarTranslucent>
+        <Pressable style={s.overlay} onPress={modalKapat} />
+        <View style={s.altSheet}>
+          <View style={s.tutamac} />
+          <Text style={s.sheetBaslik}>Sınıf</Text>
+          {SINIF_SECENEKLERI.map((o) => {
+            const secili = sinifSecim === o.deger;
+            return (
+              <TouchableOpacity
+                key={o.deger}
+                style={[s.sinifSecenek, secili && s.sinifSecenekAktif]}
+                onPress={() => setSinifSecim(o.deger)}
+                activeOpacity={0.8}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.sinifBaslik, secili && { color: COLORS.primary }]}>{o.baslik}</Text>
+                  <Text style={s.sinifAlt}>{hedefYksYili(o.deger)} YKS</Text>
+                </View>
+                {secili && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
+              </TouchableOpacity>
+            );
+          })}
+          <View style={[s.btnRow, { marginTop: 16 }]}>
+            <TouchableOpacity style={s.iptalBtn} onPress={modalKapat} activeOpacity={0.8}>
+              <Text style={s.iptalMetin}>İptal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.onayBtn} onPress={sinifKaydet} activeOpacity={0.8} disabled={islemYukleniyor}>
+              {islemYukleniyor
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Text style={s.onayMetin}>Kaydet</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -618,10 +684,11 @@ function GenelSekme({
 // ─── Ayarlar sekmesi ─────────────────────────────────────────────────────────
 
 function AyarlarSekme({
-  profil, onKocHafiza, onHedefler, onSifre, onEposta, onKvkk, onCikis, onHesapSil,
+  profil, onKocHafiza, onSinif, onHedefler, onSifre, onEposta, onKvkk, onCikis, onHesapSil,
 }: {
   profil: ProfilType | null;
   onKocHafiza: () => void;
+  onSinif: () => void;
   onHedefler: () => void;
   onSifre: () => void;
   onEposta: () => void;
@@ -632,6 +699,7 @@ function AyarlarSekme({
   return (
     <View>
       <Group header="Tercihler">
+        <Row icon="school-outline" etiket="Sınıf" deger={sinifTam(profil?.sinif)} chevron onPress={onSinif} />
         <Row icon="options-outline" etiket="Çalışma Hedefleri" chevron onPress={onHedefler} />
         <Row icon="sparkles-outline" etiket="Koç Hafızam" chevron onPress={onKocHafiza} son />
       </Group>
@@ -1069,6 +1137,16 @@ const s = StyleSheet.create({
   sifreAlani: { marginBottom: 12, alignSelf: 'stretch' },
   sifreEtiket: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 6 },
   epostaNot: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 17, marginBottom: 14, marginTop: -2 },
+
+  // Sınıf seçenekleri
+  sinifSecenek: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, paddingHorizontal: 14, borderRadius: 12, marginBottom: 8,
+    backgroundColor: COLORS.background, borderWidth: 1.5, borderColor: COLORS.cardBorder,
+  },
+  sinifSecenekAktif: { borderColor: COLORS.primary, backgroundColor: COLORS.selectedBackground },
+  sinifBaslik: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  sinifAlt: { fontSize: 12, color: COLORS.textSecondary, marginTop: 1 },
 
   // Çalışma hedefleri stepper
   hedefEtiket: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 10 },
