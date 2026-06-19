@@ -213,6 +213,12 @@ export default function OnboardingScreen() {
 
   const geri = () => setAdim(adim - 1);
 
+  // İlk adımda "geri" wizard içinde gidecek bir yer olmadığından giriş ekranına döner.
+  const girisEkraninaDon = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/login');
+  };
+
   const tamamla = async () => {
     setYukleniyor(true);
     try {
@@ -641,9 +647,13 @@ export default function OnboardingScreen() {
 
       {/* Alt Butonlar */}
       <View style={styles.altAlan}>
-        {adim > 1 && (
+        {adim > 1 ? (
           <TouchableOpacity onPress={geri} style={styles.geriButon}>
             <Text style={styles.geriButonYazi}>← Geri</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={girisEkraninaDon} style={styles.geriButon}>
+            <Text style={styles.geriButonYazi}>← Giriş</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
